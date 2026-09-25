@@ -301,6 +301,75 @@
     };
   }
 
+
+  /**
+   * Remove youtube-source stash items whose videoId (or id) is not in scrapedItems.
+   * Never touches twitter/x (or any non-youtube) items.
+   * @returns {{ items: object, pruned: number }}
+   */
+  function pruneYoutubeNotIn(existing, scrapedItems) {
+    const { items: base } = migrateInbox(existing);
+    const keep = new Set();
+    for (const raw of scrapedItems || []) {
+      if (!raw) continue;
+      if (raw.videoId) keep.add(String(raw.videoId));
+      if (raw.id) {
+        keep.add(String(raw.id));
+        const m = String(raw.id).match(/^yt:(.+)$/);
+        if (m) keep.add(m[1]);
+      }
+    }
+    const items = {};
+    let pruned = 0;
+    for (const [id, it] of Object.entries(base || {})) {
+      const src = (it?.source || "youtube").toLowerCase();
+      if (src !== "youtube" && src !== "yt") {
+        items[id] = it;
+        continue;
+      }
+      const vid = it?.videoId != null ? String(it.videoId) : null;
+      const inScraped =
+        (vid && keep.has(vid)) ||
+        keep.has(String(id)) ||
+        (vid && keep.has(`yt:${vid}`));
+      if (inScraped) {
+        items[id] = it;
+      } else {
+        pruned += 1;
+      }
+    }
+    return { items, pruned };
+  }
+
+  /**
+   * Delete stash items by id (and by yt:videoId / bare videoId aliases).
+   * @returns {{ items: object, removed: number }}
+   */
+  function removeIds(existing, ids) {
+    const { items: base } = migrateInbox(existing);
+    const drop = new Set();
+    for (const raw of ids || []) {
+      if (raw == null || raw === "") continue;
+      const s = String(raw);
+      drop.add(s);
+      const m = s.match(/^yt:(.+)$/);
+      if (m) drop.add(m[1]);
+      else drop.add(`yt:${s}`);
+    }
+    if (!drop.size) return { items: { ...base }, removed: 0 };
+    const items = {};
+    let removed = 0;
+    for (const [id, it] of Object.entries(base || {})) {
+      const vid = it?.videoId != null ? String(it.videoId) : null;
+      if (drop.has(String(id)) || (vid && drop.has(vid)) || (vid && drop.has(`yt:${vid}`))) {
+        removed += 1;
+        continue;
+      }
+      items[id] = it;
+    }
+    return { items, removed };
+  }
+
   root.StashStorage = {
     DEFAULT_CONFIG,
     getAll,
@@ -310,6 +379,8 @@
     getPlaylists,
     setPlaylists,
     mergeScraped,
+    pruneYoutubeNotIn,
+    removeIds,
     counts,
     uncategorizedList,
     isUncategorizedStatus,

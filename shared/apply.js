@@ -141,6 +141,7 @@
     let maybeAdded = 0;
     let maybeMoved = 0;
     let yesMoved = 0;
+    const stashIdsToDrop = [];
 
     if (nos.length) {
       if (noMode === "playlist" && (cfg.noPlaylistId || cfg.noPlaylistName)) {
@@ -153,6 +154,7 @@
             failed.push(`no-${res.stage} ${it.videoId}: ${res.error || "fail"}${hint}`);
           } else {
             removed += 1;
+            if (it.id) stashIdsToDrop.push(it.id);
           }
           await sleep(550);
         }
@@ -160,8 +162,10 @@
         progress(`Removing ${nos.length} no…`);
         for (const it of nos) {
           const res = await sendAction(tab.id, "STASH_REMOVE_FROM_WL", { videoId: it.videoId });
-          if (res?.ok) removed += 1;
-          else failed.push(`no ${it.videoId}: ${res?.error || "fail"}`);
+          if (res?.ok) {
+            removed += 1;
+            if (it.id) stashIdsToDrop.push(it.id);
+          } else failed.push(`no ${it.videoId}: ${res?.error || "fail"}`);
           await sleep(450);
         }
       }
@@ -183,6 +187,7 @@
         maybeAdded += 1;
         maybeMoved += 1;
         removed += 1;
+        if (it.id) stashIdsToDrop.push(it.id);
         await sleep(550);
       }
     }
@@ -199,12 +204,20 @@
           continue;
         }
         yesMoved += 1;
+        // Yes moved off WL → drop from stash so pie totals match live WL
+        if (it.id) stashIdsToDrop.push(it.id);
         await sleep(550);
       }
     }
 
+    if (stashIdsToDrop.length && root.StashStorage?.removeIds) {
+      const latest = await root.StashStorage.getAll();
+      const cleaned = root.StashStorage.removeIds(latest.stashItems, stashIdsToDrop);
+      await root.StashStorage.setItems(cleaned.items);
+    }
+
     progress("done");
-    return { ok: true, removed, maybeAdded, maybeMoved, yesMoved, failed };
+    return { ok: true, removed, maybeAdded, maybeMoved, yesMoved, failed, stashDropped: stashIdsToDrop.length };
   }
 
   root.StashApply = { applyDecisions, findYoutubeWlTab, findYoutubeTab };

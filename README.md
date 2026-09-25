@@ -32,6 +32,10 @@ Tinder-like triage for **YouTube Watch Later** (X bookmarks secondary). Built fo
 
 Uncategorized items are left alone on Apply.
 
+## Watch Later sync (0.3.9)
+
+Scan on Watch Later **prunes** youtube items that left the playlist when the scrape looks complete (≥95% of reported playlist size, or a full `ytInitialData` dump). Apply also drops successfully removed/moved videos from stash so the pie matches live WL. Use **Clear stash** to wipe storage; **Reset triage** only clears marks.
+
 ## Honesty / limits
 
 - **Scrape** uses `ytInitialData` when present, else DOM rows. YouTube A/B markup can miss views, publish date, or channel avatar.

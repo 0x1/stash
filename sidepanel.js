@@ -18,7 +18,9 @@ function renderTimeBudget(stashItems, stashConfig) {
         : stats.count
           ? ` (${stats.known} videos)`
           : "";
-    totalEl.textContent = `${fmt(stats.totalSec)}${miss}`;
+    const full = `${fmt(stats.totalSec)}${miss}`;
+    totalEl.textContent = full;
+    totalEl.title = full;
   }
 
   if (input && document.activeElement !== input) {
@@ -183,6 +185,37 @@ function playlistContextFromTitle(title, url) {
   return cleaned;
 }
 
+
+/**
+ * Safe prune after a Watch Later scrape.
+ * Completeness rule:
+ * - Prefer res.playlistVideoCount (playlist header / ytInitialData reported size).
+ * - Prune only when: isWatchLater AND scraped count > 0 AND
+ *   (playlistVideoCount != null
+ *     ? scraped >= playlistVideoCount * 0.95 OR scraped === playlistVideoCount
+ *     : scrapeMethod === "ytInitialData"  // full contents dump heuristic)
+ * - Never prunes twitter/x items (pruneYoutubeNotIn youtube-source only).
+ */
+function shouldPruneWatchLater(res) {
+  if (!res?.isWatchLater) return false;
+  const scraped = Number(res.count) || (Array.isArray(res.items) ? res.items.length : 0);
+  if (scraped <= 0) return false;
+  const plc = res.playlistVideoCount;
+  if (plc != null && Number.isFinite(Number(plc))) {
+    const n = Number(plc);
+    return scraped >= n * 0.95 || scraped === n;
+  }
+  return res.scrapeMethod === "ytInitialData";
+}
+
+function applyWatchLaterPrune(items, res) {
+  if (!shouldPruneWatchLater(res) || !StashStorage.pruneYoutubeNotIn) {
+    return { items, pruned: 0, skipped: !!res?.isWatchLater };
+  }
+  const out = StashStorage.pruneYoutubeNotIn(items, res.items || []);
+  return { items: out.items, pruned: out.pruned, skipped: false };
+}
+
 async function scan() {
   if (typeof StashScanProgress !== "undefined") {
     StashScanProgress.setScanning("scanning…");
@@ -236,7 +269,9 @@ async function scan() {
   }
 
   const { stashItems } = await StashStorage.getAll();
-  const { items, added } = StashStorage.mergeScraped(stashItems, res.items);
+  let { items, added } = StashStorage.mergeScraped(stashItems, res.items);
+  const pruneResult = applyWatchLaterPrune(items, res);
+  items = pruneResult.items;
   await StashStorage.setItems(items);
   await refresh();
 
@@ -255,12 +290,19 @@ async function scan() {
   if (res.datesEnriched > 0) enrichBits.push(`+${res.datesEnriched} dates`);
   if (res.titlesEnriched > 0) enrichBits.push(`+${res.titlesEnriched} titles`);
   const enrichBit = enrichBits.length ? ` · ${enrichBits.join(" · ")} filled` : "";
+  let pruneBit = "";
+  if (res.isWatchLater) {
+    if (pruneResult.pruned > 0) pruneBit = ` · pruned ${pruneResult.pruned} gone from WL`;
+    else if (pruneResult.skipped) {
+      pruneBit = " · kept stale (scroll fully then Scan)";
+    }
+  }
   if (typeof StashScanProgress !== "undefined") {
     if (res.isWatchLater) StashScanProgress.setContext("Watch Later");
     else if (res.playlistTitle) StashScanProgress.setContext(res.playlistTitle);
     StashScanProgress.setDone({ brief: true });
   }
-  $("status").textContent = `+${added} new · ${res.count} on page · ${hint}${method}${enrichBit}`;
+  $("status").textContent = `+${added} new · ${res.count} on page · ${hint}${method}${enrichBit}${pruneBit}`;
 }
 
 function openDeck() {
@@ -310,7 +352,7 @@ async function saveTimeBudgetFromInput() {
 }
 
 async function resetTriage() {
-  if (!confirm("Reset all yes/maybe/no marks?")) return;
+  if (!confirm("Reset marks only (does not delete videos from stash)?")) return;
   const { stashItems } = await StashStorage.getAll();
   const items = { ...stashItems };
   let n = 0;
@@ -327,10 +369,20 @@ async function resetTriage() {
   $("status").textContent = n ? `reset ${n} marks → uncategorized` : "nothing to reset";
 }
 
+async function clearStash() {
+  if (!confirm("Clear entire stash? This deletes all scraped videos from Stash (not from YouTube).")) return;
+  await StashStorage.setItems({});
+  await StashStorage.setUndo([]);
+  await refresh();
+  $("status").textContent = "stash cleared — Scan Watch Later to refill";
+}
+
 $("btn-scan").addEventListener("click", scan);
 $("btn-deck").addEventListener("click", openDeck);
 $("btn-apply").addEventListener("click", apply);
 $("btn-reset-triage").addEventListener("click", resetTriage);
+const clearBtn = $("btn-clear-stash");
+if (clearBtn) clearBtn.addEventListener("click", clearStash);
 
 const budgetInput = $("tb-budget-input");
 if (budgetInput) {

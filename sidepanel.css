@@ -348,11 +348,15 @@ button:disabled { opacity: 0.5; cursor: default; }
   gap: 6px;
   min-width: 0;
 }
-.tb-pair .tb-value {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 11em;
+.tb-pair .tb-value,
+#tb-total.tb-value {
+  overflow: visible;
+  text-overflow: unset;
+  white-space: normal;
+  max-width: none;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .tb-label {
   color: var(--muted);
@@ -499,4 +503,16 @@ button#btn-reset-triage {
   line-height: 1.3;
   min-height: 1.2em;
   letter-spacing: 0.01em;
+}
+
+button.ghost.danger,
+button#btn-clear-stash {
+  color: var(--no);
+  border-color: color-mix(in srgb, var(--no) 45%, var(--line));
+  font-weight: 600;
+}
+button.ghost.danger:hover,
+button#btn-clear-stash:hover {
+  filter: brightness(1.08);
+  background: color-mix(in srgb, var(--no) 12%, var(--panel));
 }

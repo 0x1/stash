@@ -1268,6 +1268,77 @@
     return { viewsEnriched, channelsEnriched, datesEnriched, titlesEnriched };
   }
 
+
+  function parsePlaylistVideoCount() {
+    // Prefer playlist header / sidebar "N videos" text, then ytInitialData fields.
+    const candidates = [];
+    const sel = [
+      "ytd-playlist-sidebar-primary-info-renderer #stats yt-formatted-string",
+      "ytd-playlist-header-renderer .metadata-stats",
+      "ytd-playlist-header-renderer yt-formatted-string",
+      "#page-header .yt-content-metadata-view-model__metadata-row",
+      "yt-page-header-view-model .yt-content-metadata-view-model__metadata-text",
+      "#publisher-container yt-formatted-string",
+    ];
+    for (const s of sel) {
+      for (const el of document.querySelectorAll(s)) {
+        const t = (el.textContent || "").replace(/\s+/g, " ").trim();
+        if (t) candidates.push(t);
+      }
+    }
+    // Title often "(35) Watch Later - YouTube"
+    if (document.title) candidates.push(document.title);
+    for (const t of candidates) {
+      const m =
+        t.match(/([\d,]+)\s*videos?/i) ||
+        t.match(/^\((\d+)\)/) ||
+        t.match(/\b([\d,]+)\s*video\b/i);
+      if (m) {
+        const n = parseInt(m[1].replace(/,/g, ""), 10);
+        if (Number.isFinite(n) && n >= 0) return n;
+      }
+    }
+    try {
+      const data = getYtInitialData();
+      if (data) {
+        const stack = [data];
+        const seen = new Set();
+        while (stack.length) {
+          const cur = stack.pop();
+          if (!cur || typeof cur !== "object" || seen.has(cur)) continue;
+          seen.add(cur);
+          const texts = [
+            cur?.numVideosText,
+            cur?.videoCountText,
+            cur?.stats?.[0],
+            cur?.stats,
+          ];
+          for (const raw of texts) {
+            const t = textFromRuns(raw) || (typeof raw === "string" ? raw : null);
+            if (!t) continue;
+            const m = String(t).match(/([\d,]+)\s*videos?/i);
+            if (m) {
+              const n = parseInt(m[1].replace(/,/g, ""), 10);
+              if (Number.isFinite(n) && n >= 0) return n;
+            }
+          }
+          if (typeof cur.numVideos === "number" && cur.numVideos >= 0) return cur.numVideos;
+          if (Array.isArray(cur)) {
+            for (const x of cur) stack.push(x);
+          } else {
+            for (const v of Object.values(cur)) {
+              if (v && typeof v === "object") stack.push(v);
+            }
+          }
+          if (seen.size > 8000) break;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+
   async function scrape() {
     emitScanProgress({ phase: "page", done: 0, total: 0, label: "scanning…" });
     let items = scrapeFromYtInitialData();
@@ -1373,12 +1444,15 @@
           .trim() || null;
     }
 
+    const playlistVideoCount = parsePlaylistVideoCount();
+
     return {
       ok: true,
       source: SOURCE,
       pageUrl: location.href,
       isWatchLater,
       playlistTitle,
+      playlistVideoCount,
       count: items.length,
       items,
       scrapeMethod: fromData > 0 ? "ytInitialData" : "dom",
