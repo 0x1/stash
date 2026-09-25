@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="night" data-theme-pref="system">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stash Deck</title>
+    <link rel="stylesheet" href="deck.css" />
+  </head>
+  <body tabindex="0">
+    <div id="flash" class="flash" aria-hidden="true"></div>
+
+    <header class="bar">
+      <div class="brand">
+        <span class="mark">stash</span>
+        <span class="tag">deck · #punksoftware</span>
+      </div>
+      <div class="bar-actions">
+        <button id="btn-scan" class="ghost">Scan Watch Later</button>
+        <button id="btn-apply" class="primary">Apply decisions</button>
+        <button id="btn-reset-triage" class="ghost" title="Reset all yes/maybe/no marks to uncategorized">Reset triage</button>
+        <div id="theme-switch" class="theme-switch" role="radiogroup" aria-label="Theme">
+          <button type="button" class="theme-opt" data-theme-set="day" role="radio" aria-checked="false" title="Day">☀</button>
+          <button type="button" class="theme-opt" data-theme-set="system" role="radio" aria-checked="false" title="System default">◐</button>
+          <button type="button" class="theme-opt" data-theme-set="night" role="radio" aria-checked="false" title="Night">☾</button>
+        </div>
+        <button id="btn-config" class="ghost" title="Config">⚙</button>
+      </div>
+    </header>
+
+    <section id="time-budget" class="time-budget time-budget-compact" aria-label="Time budget">
+      <div class="tb-compact-meta">
+        <span id="tb-caption" class="tb-caption">yeses — / budget — · total —</span>
+        <label class="tb-budget-inline" for="tb-budget-input">
+          <span class="tb-label">Budget</span>
+          <input id="tb-budget-input" type="number" min="0" step="15" inputmode="numeric" aria-label="Time budget in minutes" />
+          <span class="tb-unit">min</span>
+        </label>
+      </div>
+      <div id="tb-bar" class="tb-bar tone-ok" role="img" aria-label="Yes time vs budget">
+        <div id="tb-fill" class="tb-fill"></div>
+        <div id="tb-marker" class="tb-marker" title="Budget"></div>
+      </div>
+    </section>
+
+    <main class="stage">
+      <div id="empty" class="empty">
+        <h1>No uncategorized items</h1>
+        <p>Open <code>youtube.com/playlist?list=WL</code>, click <strong>Scan</strong> in the side panel (or here), then swipe.</p>
+      </div>
+
+      <article id="card" class="card" hidden>
+        <div class="pub-row">
+          <span id="pub-date" class="pub-date">—</span>
+          <span id="pub-views" class="pub-views">—</span>
+        </div>
+        <div class="thumb-wrap">
+          <img id="thumb" class="thumb" alt="" />
+          <div id="swipe-label" class="swipe-label"></div>
+        </div>
+        <div class="channel-row">
+          <img id="ch-avatar" class="ch-avatar" alt="" hidden />
+          <div id="ch-name" class="ch-name">—</div>
+        </div>
+        <h1 id="title" class="title">—</h1>
+        <div class="dur-row">
+          <span id="duration" class="duration">—</span>
+          <span id="progress" class="progress">0 / 0</span>
+        </div>
+      </article>
+    </main>
+
+    <footer class="keys">
+      <span><kbd>←</kbd> <kbd>n</kbd> <kbd>j</kbd> no</span>
+      <span><kbd>→</kbd> <kbd>y</kbd> <kbd>k</kbd> maybe</span>
+      <span><kbd>↑</kbd> <kbd>Space</kbd> yes</span>
+      <span><kbd>Esc</kbd> <kbd>⌫</kbd> undo</span>
+    </footer>
+
+        <div id="scan-progress" class="scan-progress" hidden aria-hidden="true">
+      <span id="scan-progress-context" class="scan-progress-context" hidden></span>
+      <div class="scan-progress-track" aria-hidden="true">
+        <div id="scan-progress-fill" class="scan-progress-fill"></div>
+      </div>
+      <span id="scan-progress-label" class="scan-progress-label"></span>
+    </div>
+
+    <p id="status" class="status"></p>
+
+    <aside id="config-panel" class="config" hidden>
+      <h2>Destinations</h2>
+
+      <label>
+        No destination
+        <select id="cfg-no"></select>
+      </label>
+      <label id="cfg-no-other-wrap" class="other-wrap" hidden>
+        Custom playlist name
+        <input id="cfg-no-other" type="text" placeholder="Playlist name" />
+      </label>
+
+      <label>
+        Maybe destination
+        <select id="cfg-maybe"></select>
+      </label>
+      <label id="cfg-maybe-other-wrap" class="other-wrap" hidden>
+        Custom playlist name
+        <input id="cfg-maybe-other" type="text" placeholder="Maybe Watch Later" />
+      </label>
+
+      <label>
+        Yes destination
+        <select id="cfg-yes"></select>
+      </label>
+      <label id="cfg-yes-other-wrap" class="other-wrap" hidden>
+        Custom playlist name
+        <input id="cfg-yes-other" type="text" placeholder="Stash Yes" />
+      </label>
+
+      <div class="config-actions">
+        <button id="cfg-refresh-playlists" class="ghost" type="button">Refresh playlists</button>
+        <button id="cfg-save" class="primary">Save</button>
+        <button id="cfg-close" class="ghost">Close</button>
+      </div>
+      <div class="config-actions config-danger">
+        <button id="cfg-reset-triage" class="ghost" type="button">Reset triage</button>
+        <button id="cfg-clear-stash" class="ghost" type="button">Clear stash data</button>
+      </div>
+      <p id="cfg-playlist-status" class="config-note">Playlists: not loaded yet</p>
+      <p class="config-note">
+        Destinations drive Apply: No/Maybe/Yes can remove from Watch Later and/or add to a playlist.
+        Use <strong>Refresh playlists</strong> with a YouTube tab open.
+        <strong>Reset triage</strong> puts every yes/maybe/no back to uncategorized (keeps scraped items).
+        <strong>Clear stash data</strong> wipes all items — rescan needed.
+      </p>
+    </aside>
+
+    <script src="shared/storage.js"></script>
+    <script src="shared/theme.js"></script>
+    <script src="shared/tabs.js"></script>
+    <script src="shared/apply.js"></script>
+    <script src="shared/scan-progress.js"></script>
+    <script src="deck.js"></script>
+  </body>
+</html>

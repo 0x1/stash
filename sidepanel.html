@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="night" data-theme-pref="system">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stash</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">
+        <span class="mark">stash</span>
+        <span class="tag">#punksoftware</span>
+      </div>
+      <div id="theme-switch" class="theme-switch" role="radiogroup" aria-label="Theme">
+          <button type="button" class="theme-opt" data-theme-set="day" role="radio" aria-checked="false" title="Day">☀</button>
+          <button type="button" class="theme-opt" data-theme-set="system" role="radio" aria-checked="false" title="System default">◐</button>
+          <button type="button" class="theme-opt" data-theme-set="night" role="radio" aria-checked="false" title="Night">☾</button>
+        </div>
+    </header>
+
+    <section class="pie-wrap" aria-label="Triage summary">
+      <div id="pie-empty" class="pie-empty">scan Watch Later → open deck</div>
+      <div id="pie-body" class="pie-body" hidden>
+        <div class="pie-chart" aria-hidden="true">
+          <svg id="pie-svg" class="pie-svg" viewBox="0 0 120 120" width="120" height="120"></svg>
+          <div class="pie-center">
+            <div id="pie-total" class="pie-total">0</div>
+            <div id="pie-duration" class="pie-duration">—</div>
+          </div>
+        </div>
+        <ul id="pie-legend" class="pie-legend"></ul>
+      </div>
+      <div id="pie-budget-line" class="pie-budget-line" hidden></div>
+    </section>
+
+    <div id="counts" class="counts">—</div>
+
+    <section id="time-budget" class="time-budget" aria-label="Time budget">
+      <div class="tb-row tb-compact-meta">
+        <div class="tb-pair tb-total">
+          <span class="tb-label">Total</span>
+          <span id="tb-total" class="tb-value">—</span>
+        </div>
+        <div class="tb-pair tb-budget-edit">
+          <label class="tb-label" for="tb-budget-input">Budget</label>
+          <div class="tb-budget-field">
+            <input id="tb-budget-input" type="number" min="0" step="15" inputmode="numeric" aria-label="Time budget in minutes" />
+            <span class="tb-unit">min</span>
+          </div>
+        </div>
+      </div>
+      <div id="tb-bar" class="tb-bar tone-ok" role="img" aria-label="Yes time vs budget">
+        <div id="tb-fill" class="tb-fill"></div>
+        <div id="tb-marker" class="tb-marker" title="Budget"></div>
+      </div>
+      <div id="tb-caption" class="tb-caption">yeses — / budget — · total —</div>
+    </section>
+
+    <div class="actions">
+      <button id="btn-scan" class="primary">Scan</button>
+      <button id="btn-deck" class="accent">Open full deck</button>
+      <button id="btn-apply" class="ghost">Apply</button>
+      <button id="btn-reset-triage" class="ghost" title="Reset all yes/maybe/no marks to uncategorized">Reset triage</button>
+    </div>
+
+    <div id="scan-progress" class="scan-progress" hidden aria-hidden="true">
+      <span id="scan-progress-context" class="scan-progress-context" hidden></span>
+      <div class="scan-progress-track" aria-hidden="true">
+        <div id="scan-progress-fill" class="scan-progress-fill"></div>
+      </div>
+      <span id="scan-progress-label" class="scan-progress-label"></span>
+    </div>
+
+    <p id="status" class="status">ready</p>
+    <p class="hint">Keys live on the deck tab · ← no · → maybe · ↑ yes · Esc undo</p>
+    <p class="hint">Destinations (No / Maybe / Yes playlists) are set on the deck ⚙ config.</p>
+
+    <script src="shared/storage.js"></script>
+    <script src="shared/theme.js"></script>
+    <script src="shared/tabs.js"></script>
+    <script src="shared/apply.js"></script>
+    <script src="shared/scan-progress.js"></script>
+    <script src="sidepanel.js"></script>
+  </body>
+</html>
