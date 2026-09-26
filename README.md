@@ -32,13 +32,13 @@ Tinder-like triage for **YouTube Watch Later** (X bookmarks secondary). Built fo
 
 Uncategorized items are left alone on Apply.
 
-## Watch Later sync (0.3.11)
+## Watch Later sync (0.3.12)
 
 Apply status explains **nothing to apply** (with live no/maybe/yes counts), confirms before changing YouTube, and notes when Yes stays on Watch Later (`yesMode: keep_wl`). Remove/add retries once after scrolling if a WL row is not yet in view.
 
 **Remove matching** accepts `Remove from Watch later`, `Remove from playlist`, or `Remove video` (most specific wins). On miss, Escape closes the menu and the error lists visible labels.
 
-**Apply progress** panel (`#apply-progress`) on side panel + deck shows bar, current video, counts, and recent fails — stays visible after Done/Failed until the next Apply.
+**Apply progress** — side panel is the primary live view while Apply focuses the WL tab. `#apply-progress` sits sticky under the header (thick bar, pulse while running). Progress is broadcast via `chrome.storage.local` key `stashApplyProgress` so deck ↔ side panel stay in sync. Deck keeps a widget too (with “also watching on side panel”). Apply tries `chrome.sidePanel.open` after focusing WL (best-effort).
 
 Scan on Watch Later **prunes** youtube items that left the playlist when the scrape looks complete (≥95% of reported playlist size, or a full `ytInitialData` dump). Apply also drops successfully removed/moved videos from stash so the pie matches live WL. Use **Clear stash** to wipe storage; **Reset triage** only clears marks.
 
@@ -58,4 +58,4 @@ Scan on Watch Later **prunes** youtube items that left the playlist when the scr
 
 ## Data (`chrome.storage.local`)
 
-`stashItems`, `stashConfig`, `stashUndo`, `stashPlaylists` — statuses: `uncategorized` | `no` | `maybe` | `yes`.
+`stashItems`, `stashConfig`, `stashUndo`, `stashPlaylists`, `stashApplyProgress` — statuses: `uncategorized` | `no` | `maybe` | `yes`.

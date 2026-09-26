@@ -1,5 +1,8 @@
 /** Shared Apply progress panel for side panel + deck. */
 const StashApplyProgress = (() => {
+  const STORAGE_KEY = "stashApplyProgress";
+  let listening = false;
+
   function els() {
     return {
       wrap: document.getElementById("apply-progress"),
@@ -57,7 +60,7 @@ const StashApplyProgress = (() => {
 
   /**
    * Accept rich progress object or legacy string.
-   * @param {string | { phase?: string, message?: string, done?: number, total?: number, currentTitle?: string, currentVideoId?: string, removed?: number, maybeMoved?: number, yesMoved?: number, failed?: string[] }} payload
+   * @param {string | { phase?: string, message?: string, done?: number, total?: number, currentTitle?: string, currentVideoId?: string, removed?: number, maybeMoved?: number, yesMoved?: number, failed?: string[], nothingToApply?: boolean, needWlTab?: boolean }} payload
    */
   function update(payload) {
     if (payload == null) return;
@@ -72,6 +75,12 @@ const StashApplyProgress = (() => {
       if (title) title.textContent = "Applying…";
       if (line) line.textContent = payload;
       if (status) status.textContent = payload;
+      return;
+    }
+
+    if (payload.nothingToApply || payload.needWlTab) {
+      hide();
+      if (status && payload.message) status.textContent = payload.message;
       return;
     }
 
@@ -95,7 +104,7 @@ const StashApplyProgress = (() => {
       if (phase === "failed" || (phase === "done" && failCount > 0 && removed + maybeMoved + yesMoved === 0)) {
         title.textContent = "Failed";
       } else if (phase === "done") {
-        title.textContent = failCount ? "Done" : "Done";
+        title.textContent = "Done";
       } else {
         title.textContent = "Applying…";
       }
@@ -124,6 +133,10 @@ const StashApplyProgress = (() => {
       update({ phase: "failed", message: "Failed", done: 1, total: 1, failed: ["unknown error"] });
       return;
     }
+    if (result.nothingToApply || result.needWlTab) {
+      hide();
+      return;
+    }
     const failed = Array.isArray(result.failed) ? result.failed : [];
     const phase = !result.ok && !failed.length ? "failed" : failed.length && !(result.removed || result.maybeMoved || result.yesMoved) ? "failed" : "done";
     update({
@@ -140,5 +153,44 @@ const StashApplyProgress = (() => {
     });
   }
 
-  return { show, hide, start, update, finish };
+  function applyStoragePayload(payload) {
+    if (!payload) {
+      hide();
+      return;
+    }
+    if (payload.nothingToApply || payload.needWlTab) {
+      hide();
+      return;
+    }
+    const phase = payload.phase || "running";
+    if (phase === "start") {
+      start({ total: Number(payload.total) || 0 });
+    }
+    update(payload);
+  }
+
+  function listen() {
+    if (listening || !chrome?.storage?.onChanged) return;
+    listening = true;
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== "local" || !changes[STORAGE_KEY]) return;
+      applyStoragePayload(changes[STORAGE_KEY].newValue);
+    });
+    try {
+      chrome.storage.local.get(STORAGE_KEY, (data) => {
+        if (chrome.runtime?.lastError) return;
+        const cur = data?.[STORAGE_KEY];
+        if (!cur) return;
+        const phase = cur.phase || "";
+        // Only hydrate an in-flight run; leave terminal Done/Failed for a fresh local start
+        if (phase && phase !== "done" && phase !== "failed") {
+          applyStoragePayload(cur);
+        }
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return { show, hide, start, update, finish, listen, STORAGE_KEY };
 })();

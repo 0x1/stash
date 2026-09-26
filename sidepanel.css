@@ -517,25 +517,33 @@ button#btn-clear-stash:hover {
   background: color-mix(in srgb, var(--no) 12%, var(--panel));
 }
 
-/* --- Apply progress --- */
+/* --- Apply progress (sticky top bar while applying) --- */
 .apply-progress {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin: 10px 14px 4px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
-  background: color-mix(in srgb, var(--panel) 92%, var(--accent) 4%);
+  gap: 8px;
+  margin: 0;
+  padding: 12px 14px 14px;
+  border-radius: 0;
+  border: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  background: var(--bar-bg-strong, var(--bar-bg));
+  box-shadow: 0 6px 18px color-mix(in srgb, #000 14%, transparent);
 }
 .apply-progress[hidden] {
   display: none !important;
 }
+.apply-progress.is-running,
+.apply-progress:not([hidden]) {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
 .apply-progress-title {
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: var(--fg);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  color: var(--text);
 }
 .apply-progress.is-done .apply-progress-title {
   color: var(--accent);
@@ -545,7 +553,7 @@ button#btn-clear-stash:hover {
 }
 .apply-progress-track {
   position: relative;
-  height: 8px;
+  height: 13px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--line) 55%, var(--panel));
   overflow: hidden;
@@ -557,13 +565,25 @@ button#btn-clear-stash:hover {
   background: var(--accent);
   transition: width 0.28s ease-out;
 }
+.apply-progress.is-running .apply-progress-fill {
+  animation: apply-fill-pulse 1.4s ease-in-out infinite;
+}
 .apply-progress.is-failed .apply-progress-fill {
   background: var(--no);
+  animation: none;
+}
+.apply-progress.is-done .apply-progress-fill {
+  animation: none;
+}
+@keyframes apply-fill-pulse {
+  0%, 100% { filter: brightness(1); opacity: 1; }
+  50% { filter: brightness(1.18); opacity: 0.88; }
 }
 .apply-progress-line {
-  font-size: 11px;
-  color: var(--muted);
+  font-size: 13px;
+  color: var(--text);
   font-variant-numeric: tabular-nums;
+  font-weight: 600;
   line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -571,7 +591,7 @@ button#btn-clear-stash:hover {
   min-height: 1.2em;
 }
 .apply-progress-counts {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.01em;

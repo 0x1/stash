@@ -704,3 +704,10 @@ kbd {
   box-shadow: 0 4px 18px color-mix(in srgb, #000 12%, transparent);
   background: color-mix(in srgb, var(--bar-bg-strong) 92%, transparent);
 }
+
+.apply-progress-note {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.01em;
+  margin-top: 2px;
+}

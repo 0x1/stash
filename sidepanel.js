@@ -448,3 +448,4 @@ StashTheme.load()
   });
 
 if (typeof StashScanProgress !== "undefined") StashScanProgress.listen();
+if (typeof StashApplyProgress !== "undefined") StashApplyProgress.listen();

@@ -149,6 +149,38 @@
     return it?.videoId || "?";
   }
 
+  const APPLY_PROGRESS_KEY = "stashApplyProgress";
+
+  function broadcastProgress(payload) {
+    if (!chrome?.storage?.local) return;
+    try {
+      if (payload == null) {
+        chrome.storage.local.remove(APPLY_PROGRESS_KEY).catch(() => {});
+        return;
+      }
+      const data = {};
+      data[APPLY_PROGRESS_KEY] = { ...payload, ts: Date.now() };
+      chrome.storage.local.set(data).catch(() => {});
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function tryOpenSidePanel(tab) {
+    try {
+      if (!chrome?.sidePanel?.open || !tab) return;
+      if (tab.windowId != null) {
+        await chrome.sidePanel.open({ windowId: tab.windowId });
+        return;
+      }
+      if (tab.id != null) {
+        await chrome.sidePanel.open({ tabId: tab.id });
+      }
+    } catch {
+      /* ignore — side panel may already be open or API restricted */
+    }
+  }
+
   /**
    * @param {{ onProgress?: (msg: string | object) => void }} opts
    * @returns {Promise<{ok:boolean, removed:number, maybeAdded:number, maybeMoved:number, yesMoved:number, failed:string[], needWlTab?:boolean, nothingToApply?:boolean, markedNo?:number, markedMaybe?:number, markedYes?:number, yesMode?:string, error?:string}>}
@@ -187,11 +219,14 @@
         yesMoved,
         failed: failed.slice(),
       };
+      if (partial.nothingToApply) payload.nothingToApply = true;
+      if (partial.needWlTab) payload.needWlTab = true;
       try {
         onProgress(payload);
       } catch {
         /* ignore UI errors */
       }
+      broadcastProgress(payload);
     }
 
     const nosNeedAction = nos.length > 0;
@@ -199,7 +234,7 @@
     const yesesNeedAction = yeses.length > 0;
 
     if (!nosNeedAction && !maybesNeedAction && !yesesNeedAction) {
-      return {
+      const result = {
         ok: true,
         removed: 0,
         maybeAdded: 0,
@@ -213,11 +248,22 @@
         yesMode,
         error: "nothing to apply",
       };
+      emit({
+        phase: "done",
+        message: formatApplyStatus(result),
+        done: 0,
+        total: 0,
+        nothingToApply: true,
+      });
+      return result;
     }
+
+    // Clear prior run so the other surface (side panel / deck) resets
+    broadcastProgress(null);
 
     let tab = await findYoutubeWlTab();
     if (!tab?.id) {
-      return {
+      const result = {
         ok: false,
         removed: 0,
         maybeAdded: 0,
@@ -227,6 +273,14 @@
         needWlTab: true,
         error: "Open youtube.com/playlist?list=WL in a tab, then Apply again",
       };
+      emit({
+        phase: "failed",
+        message: result.error,
+        done: 0,
+        total,
+        needWlTab: true,
+      });
+      return result;
     }
 
     try {
@@ -236,9 +290,12 @@
       /* ignore */
     }
 
+    // Keep/open side panel so user can watch progress while WL tab is focused
+    await tryOpenSidePanel(tab);
+
     const ready = await ensureContentScript(tab.id);
     if (!ready) {
-      return {
+      const result = {
         ok: false,
         removed: 0,
         maybeAdded: 0,
@@ -247,6 +304,13 @@
         failed: [],
         error: "Content script unavailable — reload the YouTube tab",
       };
+      emit({
+        phase: "failed",
+        message: result.error,
+        done: 0,
+        total,
+      });
+      return result;
     }
 
     const stashIdsToDrop = [];

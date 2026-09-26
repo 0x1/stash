@@ -19,6 +19,16 @@
         </div>
     </header>
 
+    <div id="apply-progress" class="apply-progress" hidden aria-hidden="true">
+      <div id="apply-progress-title" class="apply-progress-title">Applying…</div>
+      <div class="apply-progress-track" aria-hidden="true">
+        <div id="apply-progress-fill" class="apply-progress-fill"></div>
+      </div>
+      <div id="apply-progress-line" class="apply-progress-line"></div>
+      <div id="apply-progress-counts" class="apply-progress-counts"></div>
+      <ul id="apply-progress-errors" class="apply-progress-errors"></ul>
+    </div>
+
     <section class="pie-wrap" aria-label="Triage summary">
       <div id="pie-empty" class="pie-empty">scan Watch Later → open deck</div>
       <div id="pie-body" class="pie-body" hidden>
@@ -71,16 +81,6 @@
         <div id="scan-progress-fill" class="scan-progress-fill"></div>
       </div>
       <span id="scan-progress-label" class="scan-progress-label"></span>
-    </div>
-
-    <div id="apply-progress" class="apply-progress" hidden aria-hidden="true">
-      <div id="apply-progress-title" class="apply-progress-title">Applying…</div>
-      <div class="apply-progress-track" aria-hidden="true">
-        <div id="apply-progress-fill" class="apply-progress-fill"></div>
-      </div>
-      <div id="apply-progress-line" class="apply-progress-line"></div>
-      <div id="apply-progress-counts" class="apply-progress-counts"></div>
-      <ul id="apply-progress-errors" class="apply-progress-errors"></ul>
     </div>
 
     <p id="status" class="status">ready</p>
