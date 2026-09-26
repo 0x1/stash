@@ -250,8 +250,8 @@
     return { sec, known, missing, count: list.length };
   }
 
-  /** Human-readable long form: "3h 42m", "42m", "0m". */
-  function fmtDurationLong(sec) {
+  /** Exact hours+minutes for tooltips: "970h 17m", "3h 42m", "42m", "0m". */
+  function fmtDurationExact(sec) {
     if (sec == null || !Number.isFinite(sec) || sec < 0) return "—";
     sec = Math.round(sec);
     const h = Math.floor(sec / 3600);
@@ -259,6 +259,32 @@
     if (h > 0 && m > 0) return `${h}h ${m}m`;
     if (h > 0) return `${h}h`;
     return `${m}m`;
+  }
+
+  /**
+   * Compact duration for UI totals.
+   * <1h: Nm · <24h: Xh Ym (omit 0m) · ≥24h: Nw Nd Nh (omit zero units;
+   * minutes only when total < 48h).
+   */
+  function fmtDurationLong(sec) {
+    if (sec == null || !Number.isFinite(sec) || sec < 0) return "—";
+    sec = Math.round(sec);
+    const totalH = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    if (totalH < 1) return `${m}m`;
+    if (totalH < 24) {
+      return m > 0 ? `${totalH}h ${m}m` : `${totalH}h`;
+    }
+    const w = Math.floor(totalH / 168);
+    const d = Math.floor((totalH % 168) / 24);
+    const h = totalH % 24;
+    const parts = [];
+    if (w > 0) parts.push(`${w}w`);
+    if (d > 0) parts.push(`${d}d`);
+    if (h > 0) parts.push(`${h}h`);
+    // Keep minutes under 48h so short multi-day totals stay precise
+    if (totalH < 48 && m > 0) parts.push(`${m}m`);
+    return parts.length ? parts.join(" ") : "0m";
   }
 
   /**
@@ -387,6 +413,7 @@
     migrateConfig,
     sumDuration,
     fmtDurationLong,
+    fmtDurationExact,
     timeBudgetStats,
   };
 })(typeof globalThis !== "undefined" ? globalThis : window);

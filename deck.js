@@ -40,6 +40,7 @@ function flash(kind) {
 function renderTimeBudget() {
   const stats = StashStorage.timeBudgetStats(items, config);
   const fmt = StashStorage.fmtDurationLong;
+  const exact = StashStorage.fmtDurationExact;
   const section = $("time-budget");
   const bar = $("tb-bar");
   const fill = $("tb-fill");
@@ -63,6 +64,8 @@ function renderTimeBudget() {
   if (caption) {
     caption.textContent =
       `yeses ${fmt(stats.yesSec)} / budget ${fmt(stats.budgetSec)} · total ${fmt(stats.totalSec)}`;
+    caption.title =
+      `yeses ${exact(stats.yesSec)} / budget ${exact(stats.budgetSec)} · total ${exact(stats.totalSec)}`;
   }
 }
 

@@ -32,7 +32,11 @@ Tinder-like triage for **YouTube Watch Later** (X bookmarks secondary). Built fo
 
 Uncategorized items are left alone on Apply.
 
-## Watch Later sync (0.3.14)
+## Watch Later sync (0.3.15)
+
+**Duration totals** compact when ≥24h (`5w 5d 10h`); hover `title` shows exact hours (`970h 17m`).
+
+**Apply ⋮ menus** are scoped to open popup roots (`ytd-menu-popup-renderer`, open `tp-yt-iron-dropdown`, `tp-yt-paper-listbox`) — left guide entries (Home / Shorts / Subscriptions) are filtered out so Remove / Save resolve correctly.
 
 Apply status explains **nothing to apply** (with live no/maybe/yes counts), confirms before changing YouTube, and notes when Yes stays on Watch Later (`yesMode: keep_wl`). Remove/add retries once after scrolling if a WL row is not yet in view.
 

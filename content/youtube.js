@@ -1840,15 +1840,118 @@
     return true;
   }
 
+  /** Left-rail / guide labels that must never count as ⋮ menu items. */
+  const GUIDE_MENU_NOISE =
+    /^(home|shorts|subscriptions|you|history|playlists|your videos|your movies|watch later|liked videos|downloads|library|explore|shopping|music|movies & tv|live|gaming|news|sports|learning|fashion & beauty|podcasts|playables|yt music|youtube music|youtube kids|youtube tv)$/i;
+
+  function isGuideMenuNoise(text) {
+    const t = String(text || "").replace(/\s+/g, " ").trim();
+    if (!t) return true;
+    if (GUIDE_MENU_NOISE.test(t)) return true;
+    // Guide entries often append unread counts: "Subscriptions 3"
+    const base = t.replace(/\s+\d+$/, "");
+    return GUIDE_MENU_NOISE.test(base);
+  }
+
+  /** Open row ⋮ popup roots — never the left guide sidebar. */
+  function collectOpenMenuRoots() {
+    const roots = [];
+    const seen = new Set();
+    const add = (el) => {
+      if (!el || seen.has(el)) return;
+      // Skip anything inside the guide / mini-guide
+      if (el.closest?.("ytd-guide-renderer, #guide-content, ytd-mini-guide-renderer, #guide")) {
+        return;
+      }
+      if (!visible(el) && el.getAttribute?.("aria-hidden") === "true") return;
+      seen.add(el);
+      roots.push(el);
+    };
+
+    for (const el of document.querySelectorAll("ytd-menu-popup-renderer")) {
+      if (visible(el) || el.querySelector?.("[role='menuitem'], ytd-menu-service-item-renderer, tp-yt-paper-item")) {
+        add(el);
+      }
+    }
+    for (const el of document.querySelectorAll(
+      "tp-yt-iron-dropdown:not([aria-hidden='true']), tp-yt-iron-dropdown[aria-hidden='false']"
+    )) {
+      // Prefer dropdowns that host a menu popup / listbox
+      if (
+        el.querySelector?.(
+          "ytd-menu-popup-renderer, tp-yt-paper-listbox, yt-list-view-model, [role='menu'], [role='menuitem']"
+        )
+      ) {
+        add(el);
+      }
+    }
+    for (const el of document.querySelectorAll("tp-yt-paper-listbox")) {
+      const host =
+        el.closest("ytd-menu-popup-renderer, tp-yt-iron-dropdown, [role='menu']") || el;
+      add(host);
+    }
+    for (const el of document.querySelectorAll(
+      "ytd-menu-popup-renderer [id^='items'], yt-list-view-model"
+    )) {
+      const host =
+        el.closest("ytd-menu-popup-renderer, tp-yt-iron-dropdown, [role='menu']") || el;
+      add(host);
+    }
+    return roots;
+  }
+
+  function menuItemsInRoot(root) {
+    if (!root) return [];
+    const nodes = root.querySelectorAll(
+      "ytd-menu-service-item-renderer, ytd-menu-navigation-item-renderer, tp-yt-paper-item, yt-list-item-view-model, [role='menuitem']"
+    );
+    const out = [];
+    const seen = new Set();
+    for (const el of nodes) {
+      if (!visible(el)) continue;
+      const t = textOf(el);
+      if (isGuideMenuNoise(t)) continue;
+      // Prefer the renderer / menuitem wrapper over nested formatted-string
+      const item =
+        el.closest?.(
+          "ytd-menu-service-item-renderer, ytd-menu-navigation-item-renderer, [role='menuitem'], tp-yt-paper-item, yt-list-item-view-model"
+        ) || el;
+      if (seen.has(item)) continue;
+      seen.add(item);
+      out.push(item);
+    }
+    return out;
+  }
+
+  async function waitForMenuPopup(timeoutMs) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const roots = collectOpenMenuRoots();
+      if (roots.length) return roots;
+      await sleep(80);
+    }
+    return [];
+  }
+
   async function waitForMenuItems(timeoutMs) {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
-      const items = [
-        ...document.querySelectorAll(
-          "ytd-menu-service-item-renderer, tp-yt-paper-item, ytd-menu-popup-renderer yt-formatted-string, [role='menuitem']"
-        ),
-      ].filter(visible);
-      if (items.length) return items;
+      const roots = collectOpenMenuRoots();
+      if (roots.length) {
+        const items = [];
+        for (const root of roots) {
+          items.push(...menuItemsInRoot(root));
+        }
+        // Dedupe
+        const uniq = [];
+        const seen = new Set();
+        for (const el of items) {
+          if (seen.has(el)) continue;
+          seen.add(el);
+          uniq.push(el);
+        }
+        if (uniq.length) return uniq;
+      }
       await sleep(80);
     }
     return [];
@@ -1920,12 +2023,17 @@
     await sleep(150);
     if (!clickMenuButton(row)) return { ok: false, error: "menu button not found" };
 
+    const popupRoots = await waitForMenuPopup(MENU_TIMEOUT_MS);
+    if (!popupRoots.length) {
+      pressEscape();
+      return { ok: false, error: "Remove menu popup not found (row ⋮ did not open)" };
+    }
     const items = await waitForMenuItems(MENU_TIMEOUT_MS);
     const target = pickRemoveMenuItem(items);
     if (!target) {
       pressEscape();
       const labels = visibleMenuLabels(items, 4);
-      const listed = labels.length ? labels.join(" · ") : "(empty menu)";
+      const listed = labels.length ? labels.join(" · ") : "(empty popup — no Remove item)";
       return {
         ok: false,
         error: `Remove item not in menu (saw: ${listed})`,
@@ -2002,6 +2110,15 @@
       return { ok: false, needsApi: true, error: "menu button not found" };
     }
 
+    const popupRoots = await waitForMenuPopup(MENU_TIMEOUT_MS);
+    if (!popupRoots.length) {
+      pressEscape();
+      return {
+        ok: false,
+        needsApi: true,
+        error: "Save menu popup not found (row ⋮ did not open)",
+      };
+    }
     let items = await waitForMenuItems(MENU_TIMEOUT_MS);
     let saveItem = items.find(
       (el) => /save to playlist/i.test(textOf(el)) || /^save$/i.test(textOf(el))
@@ -2009,7 +2126,7 @@
     if (!saveItem) {
       pressEscape();
       const labels = visibleMenuLabels(items, 4);
-      const listed = labels.length ? labels.join(" · ") : "(empty menu)";
+      const listed = labels.length ? labels.join(" · ") : "(empty popup — no Save item)";
       return {
         ok: false,
         needsApi: true,
@@ -2025,12 +2142,29 @@
 
     const start = Date.now();
     let playlistEl = null;
+    // Prefer candidates inside the Save / add-to playlist panel (not the guide)
+    const pickerRootSelectors =
+      "ytd-add-to-playlist-renderer, yt-sheet-view-model, tp-yt-paper-dialog, " +
+      "ytd-playlist-add-to-option-renderer, [aria-label*='Save to'], [aria-label*='Add to']";
     while (Date.now() - start < MENU_TIMEOUT_MS) {
-      const candidates = [
-        ...document.querySelectorAll(
+      const pickerRoots = [...document.querySelectorAll(pickerRootSelectors)].filter(
+        (el) =>
+          visible(el) &&
+          !el.closest?.("ytd-guide-renderer, #guide-content, ytd-mini-guide-renderer")
+      );
+      const searchRoots = pickerRoots.length ? pickerRoots : [document];
+      const candidates = [];
+      const seenCand = new Set();
+      for (const root of searchRoots) {
+        for (const el of root.querySelectorAll(
           "ytd-playlist-add-to-option-renderer, tp-yt-paper-checkbox, yt-list-item-view-model, [role='checkbox'], ytd-compact-playlist-renderer, yt-lockup-view-model"
-        ),
-      ].filter(visible);
+        )) {
+          if (!visible(el) || seenCand.has(el)) continue;
+          if (el.closest?.("ytd-guide-renderer, #guide-content, ytd-mini-guide-renderer")) continue;
+          seenCand.add(el);
+          candidates.push(el);
+        }
+      }
 
       // Prefer id match, then exact name
       if (playlistId) {

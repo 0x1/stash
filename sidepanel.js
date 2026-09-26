@@ -3,6 +3,7 @@ const $ = (id) => document.getElementById(id);
 function renderTimeBudget(stashItems, stashConfig) {
   const stats = StashStorage.timeBudgetStats(stashItems, stashConfig);
   const fmt = StashStorage.fmtDurationLong;
+  const exact = StashStorage.fmtDurationExact;
   const section = $("time-budget");
   const bar = $("tb-bar");
   const fill = $("tb-fill");
@@ -18,9 +19,8 @@ function renderTimeBudget(stashItems, stashConfig) {
         : stats.count
           ? ` (${stats.known} videos)`
           : "";
-    const full = `${fmt(stats.totalSec)}${miss}`;
-    totalEl.textContent = full;
-    totalEl.title = full;
+    totalEl.textContent = `${fmt(stats.totalSec)}${miss}`;
+    totalEl.title = `${exact(stats.totalSec)}${miss}`;
   }
 
   if (input && document.activeElement !== input) {
@@ -40,6 +40,8 @@ function renderTimeBudget(stashItems, stashConfig) {
   if (caption) {
     caption.textContent =
       `yeses ${fmt(stats.yesSec)} / budget ${fmt(stats.budgetSec)} · total ${fmt(stats.totalSec)}`;
+    caption.title =
+      `yeses ${exact(stats.yesSec)} / budget ${exact(stats.budgetSec)} · total ${exact(stats.totalSec)}`;
   }
 }
 
@@ -47,6 +49,7 @@ function renderPie(stashItems, stashConfig) {
   const c = StashStorage.counts(stashItems);
   const totalDur = StashStorage.sumDuration(stashItems);
   const fmt = StashStorage.fmtDurationLong;
+  const exact = StashStorage.fmtDurationExact;
   const empty = $("pie-empty");
   const body = $("pie-body");
   const budgetLine = $("pie-budget-line");
@@ -97,7 +100,11 @@ function renderPie(stashItems, stashConfig) {
   }
 
   if ($("pie-total")) $("pie-total").textContent = String(c.total);
-  if ($("pie-duration")) $("pie-duration").textContent = fmt(totalDur.sec);
+  const pieDur = $("pie-duration");
+  if (pieDur) {
+    pieDur.textContent = fmt(totalDur.sec);
+    pieDur.title = exact(totalDur.sec);
+  }
 
   const legend = $("pie-legend");
   if (legend) {
@@ -117,6 +124,8 @@ function renderPie(stashItems, stashConfig) {
     budgetLine.innerHTML =
       `<span class="yes-bit">yes ${fmt(stats.yesSec)}</span>` +
       ` / budget ${fmt(stats.budgetSec)}`;
+    budgetLine.title =
+      `yes ${exact(stats.yesSec)} / budget ${exact(stats.budgetSec)}`;
   }
   if (wrap) {
     wrap.classList.remove("tone-ok", "tone-warm", "tone-over");

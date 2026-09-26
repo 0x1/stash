@@ -147,9 +147,10 @@ const StashApplyProgress = (() => {
         : failed.length && !anyOk
           ? "failed"
           : "done";
+    // Title carries Done/Failed; keep line as counts summary (avoid double "Done")
     update({
       phase,
-      message: phase === "failed" ? "Failed" : result.staleOnly ? "Cleared stale" : "Done",
+      message: result.staleOnly && phase === "done" ? "Cleared stale" : "",
       done: Number(result.done) || 1,
       total: Number(result.total) || 1,
       removed: result.removed || 0,
