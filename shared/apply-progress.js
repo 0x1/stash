@@ -42,7 +42,7 @@ const StashApplyProgress = (() => {
     if (title) title.textContent = "Applying…";
     if (fill) fill.style.width = "0%";
     if (line) line.textContent = total > 0 ? `0 / ${total}` : "starting…";
-    if (counts) counts.textContent = "removed 0 · maybe 0 · yes 0 · fails 0";
+    if (counts) counts.textContent = "removed 0 · maybe 0 · yes 0 · gone 0 · fails 0";
     if (errors) errors.innerHTML = "";
   }
 
@@ -90,6 +90,7 @@ const StashApplyProgress = (() => {
     const removed = Number(payload.removed) || 0;
     const maybeMoved = Number(payload.maybeMoved) || 0;
     const yesMoved = Number(payload.yesMoved) || 0;
+    const alreadyGone = Number(payload.alreadyGone) || 0;
     const failed = Array.isArray(payload.failed) ? payload.failed : [];
     const failCount = failed.length;
 
@@ -121,7 +122,7 @@ const StashApplyProgress = (() => {
     if (line) line.textContent = lineText;
 
     if (counts) {
-      counts.textContent = `removed ${removed} · maybe ${maybeMoved} · yes ${yesMoved} · fails ${failCount}`;
+      counts.textContent = `removed ${removed} · maybe ${maybeMoved} · yes ${yesMoved} · gone ${alreadyGone} · fails ${failCount}`;
     }
     renderErrors(failed);
 
@@ -138,15 +139,23 @@ const StashApplyProgress = (() => {
       return;
     }
     const failed = Array.isArray(result.failed) ? result.failed : [];
-    const phase = !result.ok && !failed.length ? "failed" : failed.length && !(result.removed || result.maybeMoved || result.yesMoved) ? "failed" : "done";
+    const anyOk =
+      result.removed || result.maybeMoved || result.yesMoved || result.alreadyGone || result.staleOnly;
+    const phase =
+      !result.ok && !failed.length
+        ? "failed"
+        : failed.length && !anyOk
+          ? "failed"
+          : "done";
     update({
       phase,
-      message: phase === "failed" ? "Failed" : "Done",
+      message: phase === "failed" ? "Failed" : result.staleOnly ? "Cleared stale" : "Done",
       done: Number(result.done) || 1,
       total: Number(result.total) || 1,
       removed: result.removed || 0,
       maybeMoved: result.maybeMoved || 0,
       yesMoved: result.yesMoved || 0,
+      alreadyGone: result.alreadyGone || 0,
       failed,
       currentTitle: "",
       currentVideoId: "",

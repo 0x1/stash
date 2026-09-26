@@ -200,6 +200,7 @@ function shouldPruneWatchLater(res) {
   if (!res?.isWatchLater) return false;
   const scraped = Number(res.count) || (Array.isArray(res.items) ? res.items.length : 0);
   if (scraped <= 0) return false;
+  if (res.loadedFully === true) return true;
   const plc = res.playlistVideoCount;
   if (plc != null && Number.isFinite(Number(plc))) {
     const n = Number(plc);
@@ -279,7 +280,7 @@ async function scan() {
     res.source === "youtube"
       ? res.isWatchLater
         ? "watch later"
-        : "yt playlist (scroll for more)"
+        : "yt playlist"
       : res.isBookmarks
         ? "bookmarks"
         : "x page";
@@ -294,7 +295,19 @@ async function scan() {
   if (res.isWatchLater) {
     if (pruneResult.pruned > 0) pruneBit = ` · pruned ${pruneResult.pruned} gone from WL`;
     else if (pruneResult.skipped) {
-      pruneBit = " · kept stale (scroll fully then Scan)";
+      pruneBit = " · kept stale (partial load)";
+    }
+  }
+  let loadBit = "";
+  if (res.source === "youtube" && (res.playlistVideoCount != null || res.loadedFully != null)) {
+    const got = res.count ?? 0;
+    const want = res.playlistVideoCount;
+    if (res.loadedFully || (want != null && got >= want)) {
+      loadBit = want != null ? ` · loaded ${got} / ${want}` : ` · loaded ${got}`;
+    } else if (want != null) {
+      loadBit = ` · partial ${got} / ${want} — scroll stalled`;
+    } else {
+      loadBit = ` · loaded ${got}`;
     }
   }
   if (typeof StashScanProgress !== "undefined") {
@@ -302,7 +315,7 @@ async function scan() {
     else if (res.playlistTitle) StashScanProgress.setContext(res.playlistTitle);
     StashScanProgress.setDone({ brief: true });
   }
-  $("status").textContent = `+${added} new · ${res.count} on page · ${hint}${method}${enrichBit}${pruneBit}`;
+  $("status").textContent = `+${added} new · ${res.count} on page · ${hint}${method}${enrichBit}${pruneBit}${loadBit}`;
 }
 
 function openDeck() {

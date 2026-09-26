@@ -58,11 +58,21 @@
       playlistId: playlistId || undefined,
       playlistName: playlistName || undefined,
     });
-    if (!add?.ok) return { ok: false, stage: "add", error: add?.error, needsApi: add?.needsApi };
+    if (!add?.ok) {
+      // Row already gone from WL — nothing to add/remove; drop the stash mark
+      if (/row not found/i.test(String(add?.error || ""))) {
+        return { ok: true, alreadyGone: true, added: false };
+      }
+      return { ok: false, stage: "add", error: add?.error, needsApi: add?.needsApi };
+    }
     await sleep(400);
     const rm = await sendAction(tabId, "STASH_REMOVE_FROM_WL", { videoId });
+    // Remove stage: alreadyGone counts as success for dropping the stash mark
+    if (rm?.alreadyGone) {
+      return { ok: true, alreadyGone: true, added: true };
+    }
     if (!rm?.ok) return { ok: false, stage: "remove", error: rm?.error, added: true };
-    return { ok: true };
+    return { ok: true, alreadyGone: false };
   }
 
   function ytMarked(all, status) {
@@ -126,9 +136,28 @@
     const removed = result.removed ?? 0;
     const maybeMoved = result.maybeMoved ?? 0;
     const yesMoved = result.yesMoved ?? 0;
-    let msg = `removed ${removed} · maybe moved ${maybeMoved} · yes moved ${yesMoved}`;
+    const alreadyGone = result.alreadyGone ?? 0;
+    const stashDropped = result.stashDropped ?? 0;
 
-    if (removed === 0 && maybeMoved === 0 && yesMoved === 0 && !result.error) {
+    // Apply only cleared stale marks (already off Watch Later)
+    if (
+      result.staleOnly ||
+      (alreadyGone > 0 &&
+        removed === 0 &&
+        maybeMoved === 0 &&
+        yesMoved === 0 &&
+        !(result.failed && result.failed.length))
+    ) {
+      const n = alreadyGone || stashDropped;
+      return `cleared ${n} stale mark${n === 1 ? "" : "s"} (already off Watch Later)`;
+    }
+
+    let msg = `removed ${removed} · maybe moved ${maybeMoved} · yes moved ${yesMoved}`;
+    if (alreadyGone > 0) {
+      msg += ` · skipped ${alreadyGone} already gone`;
+    }
+
+    if (removed === 0 && maybeMoved === 0 && yesMoved === 0 && alreadyGone === 0 && !result.error) {
       msg += " · nothing changed";
     }
 
@@ -204,6 +233,7 @@
     let maybeAdded = 0;
     let maybeMoved = 0;
     let yesMoved = 0;
+    let alreadyGone = 0;
     let done = 0;
 
     function emit(partial) {
@@ -217,6 +247,7 @@
         removed,
         maybeMoved,
         yesMoved,
+        alreadyGone,
         failed: failed.slice(),
       };
       if (partial.nothingToApply) payload.nothingToApply = true;
@@ -335,12 +366,19 @@
             currentVideoId: it.videoId || "",
           });
           const res = await addThenRemove(tab.id, it.videoId, cfg.noPlaylistId, cfg.noPlaylistName);
-          if (!res.ok) {
+          if (res.ok || res.alreadyGone) {
+            if (res.alreadyGone) alreadyGone += 1;
+            else removed += 1;
+            if (it.id) stashIdsToDrop.push(it.id);
+          } else {
             const hint = res.needsApi ? " (create playlist first / DOM save menu)" : "";
             failed.push(`no-${res.stage} ${it.videoId}: ${res.error || "fail"}${hint}`);
-          } else {
-            removed += 1;
-            if (it.id) stashIdsToDrop.push(it.id);
+            // add succeeded but remove alreadyGone should not reach here (ok:true);
+            // still drop if remove-stage alreadyGone leaked as fail
+            if (res.stage === "remove" && res.alreadyGone && it.id) {
+              alreadyGone += 1;
+              stashIdsToDrop.push(it.id);
+            }
           }
           done += 1;
           emit({
@@ -362,8 +400,9 @@
             currentVideoId: it.videoId || "",
           });
           const res = await sendAction(tab.id, "STASH_REMOVE_FROM_WL", { videoId: it.videoId });
-          if (res?.ok) {
-            removed += 1;
+          if (res?.ok || res?.alreadyGone) {
+            if (res?.alreadyGone) alreadyGone += 1;
+            else removed += 1;
             if (it.id) stashIdsToDrop.push(it.id);
           } else failed.push(`no ${it.videoId}: ${res?.error || "fail"}`);
           done += 1;
@@ -391,10 +430,15 @@
           currentVideoId: it.videoId || "",
         });
         const res = await addThenRemove(tab.id, it.videoId, maybeId, maybeName);
-        if (!res.ok) {
+        if (!res.ok && !res.alreadyGone) {
           const hint = res.needsApi ? " (create playlist first / DOM save menu)" : "";
           failed.push(`maybe-${res.stage} ${it.videoId}: ${res.error || "fail"}${hint}`);
           if (res.added) maybeAdded += 1;
+          // add ok + remove alreadyGone should be ok:true; belt-and-suspenders drop
+          if (res.stage === "remove" && res.alreadyGone && it.id) {
+            alreadyGone += 1;
+            stashIdsToDrop.push(it.id);
+          }
           done += 1;
           emit({
             phase: "maybe",
@@ -407,8 +451,12 @@
           continue;
         }
         maybeAdded += 1;
-        maybeMoved += 1;
-        removed += 1;
+        if (res.alreadyGone) {
+          alreadyGone += 1;
+        } else {
+          maybeMoved += 1;
+          removed += 1;
+        }
         if (it.id) stashIdsToDrop.push(it.id);
         done += 1;
         emit({
@@ -434,8 +482,12 @@
           currentVideoId: it.videoId || "",
         });
         const res = await addThenRemove(tab.id, it.videoId, yesId, yesName);
-        if (!res.ok) {
+        if (!res.ok && !res.alreadyGone) {
           failed.push(`yes-${res.stage} ${it.videoId}: ${res.error || "fail"}`);
+          if (res.stage === "remove" && res.alreadyGone && it.id) {
+            alreadyGone += 1;
+            stashIdsToDrop.push(it.id);
+          }
           done += 1;
           emit({
             phase: "yes",
@@ -447,8 +499,9 @@
           await sleep(450);
           continue;
         }
-        yesMoved += 1;
-        // Yes moved off WL → drop from stash so pie totals match live WL
+        if (res.alreadyGone) alreadyGone += 1;
+        else yesMoved += 1;
+        // Yes moved off WL (or already gone) → drop from stash so pie totals match live WL
         if (it.id) stashIdsToDrop.push(it.id);
         done += 1;
         emit({
@@ -474,14 +527,26 @@
       maybeAdded,
       maybeMoved,
       yesMoved,
+      alreadyGone,
       failed,
       stashDropped: stashIdsToDrop.length,
+      staleOnly:
+        alreadyGone > 0 &&
+        removed === 0 &&
+        maybeMoved === 0 &&
+        yesMoved === 0 &&
+        failed.length === 0,
     };
-    const anyOk = removed > 0 || maybeMoved > 0 || yesMoved > 0;
+    const anyOk = removed > 0 || maybeMoved > 0 || yesMoved > 0 || alreadyGone > 0;
     const endPhase = failed.length && !anyOk ? "failed" : "done";
     emit({
       phase: endPhase,
-      message: endPhase === "failed" ? "Failed" : "Done",
+      message:
+        endPhase === "failed"
+          ? "Failed"
+          : result.staleOnly
+            ? formatApplyStatus(result)
+            : "Done",
       done: total,
       total,
       currentTitle: "",

@@ -1339,7 +1339,190 @@
     return null;
   }
 
+
+  /** Unique videoIds currently present in DOM rows + ytInitialData (best-effort). */
+  function countLoadedPlaylistVideoIds() {
+    const ids = new Set();
+    try {
+      for (const it of scrapeFromYtInitialData()) {
+        if (it?.videoId) ids.add(it.videoId);
+      }
+    } catch {
+      /* ignore */
+    }
+    try {
+      for (const it of scrapeFromDom()) {
+        if (it?.videoId) ids.add(it.videoId);
+      }
+    } catch {
+      /* ignore */
+    }
+    // Cheap DOM pass for ids even when title/filter would drop them
+    document
+      .querySelectorAll(
+        "ytd-playlist-video-renderer a[href*='watch?v='], yt-lockup-view-model a[href*='watch?v='], ytd-playlist-panel-video-renderer a[href*='watch?v=']"
+      )
+      .forEach((a) => {
+        const id = videoIdFromHref(a.href || a.getAttribute("href") || "");
+        if (id) ids.add(id);
+      });
+    return ids;
+  }
+
+  function findPlaylistScrollParent() {
+    const candidates = [
+      document.querySelector("ytd-playlist-video-list-renderer #contents"),
+      document.querySelector("#contents.ytd-playlist-video-list-renderer"),
+      document.querySelector("ytd-playlist-video-list-renderer"),
+      document.querySelector("ytd-two-column-browse-results-renderer #primary"),
+      document.querySelector("ytd-two-column-browse-results-renderer"),
+      document.querySelector("#primary ytd-section-list-renderer"),
+      document.scrollingElement,
+    ].filter(Boolean);
+    for (const el of candidates) {
+      try {
+        const style = window.getComputedStyle(el);
+        const oy = style?.overflowY || "";
+        const scrollable =
+          el.scrollHeight > el.clientHeight + 40 &&
+          (oy === "auto" || oy === "scroll" || oy === "overlay" || el === document.scrollingElement);
+        if (scrollable || el === document.scrollingElement) return el;
+      } catch {
+        /* try next */
+      }
+    }
+    return document.scrollingElement || document.documentElement;
+  }
+
+  function scrollPlaylistToBottom() {
+    const el = findPlaylistScrollParent();
+    try {
+      if (el && el !== document.scrollingElement && el !== document.documentElement && el !== document.body) {
+        el.scrollTop = el.scrollHeight;
+      }
+    } catch {
+      /* ignore */
+    }
+    try {
+      window.scrollTo(0, document.documentElement.scrollHeight || document.body.scrollHeight || 0);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /**
+   * Auto-scroll a playlist / Watch Later page until rows are loaded (or stall / cap).
+   * @returns {{ loadedFully: boolean, playlistVideoCount: number|null, scrollPasses: number, loadedCount: number }}
+   */
+  async function ensurePlaylistFullyLoaded() {
+    const target = parsePlaylistVideoCount();
+    let ids = countLoadedPlaylistVideoIds();
+    let loaded = ids.size;
+    let scrollPasses = 0;
+    let stagnant = 0;
+    const MAX_SCROLLS = 80;
+    const STAGNANT_LIMIT = 4;
+    const RATIO = 0.98;
+    const started = Date.now();
+    const MAX_MS = 45000;
+
+    const isPlaylistPage =
+      /[?&]list=/i.test(location.href) ||
+      /playlist/i.test(location.pathname) ||
+      /watch_later/i.test(location.href);
+
+    if (!isPlaylistPage) {
+      return {
+        loadedFully: true,
+        playlistVideoCount: target,
+        scrollPasses: 0,
+        loadedCount: loaded,
+      };
+    }
+
+    emitScanProgress({
+      phase: "loading",
+      done: loaded,
+      total: target || loaded || 0,
+      label: target
+        ? `loading playlist… ${loaded} / ${target}`
+        : `loading playlist… ${loaded}`,
+    });
+
+    // Already complete?
+    if (target != null && loaded >= target * RATIO) {
+      return {
+        loadedFully: loaded >= target * RATIO,
+        playlistVideoCount: target,
+        scrollPasses: 0,
+        loadedCount: loaded,
+      };
+    }
+
+    while (scrollPasses < MAX_SCROLLS && Date.now() - started < MAX_MS) {
+      const prev = loaded;
+      scrollPlaylistToBottom();
+      scrollPasses += 1;
+      await sleep(350 + Math.floor(Math.random() * 200)); // ~350–550ms
+      ids = countLoadedPlaylistVideoIds();
+      loaded = ids.size;
+
+      emitScanProgress({
+        phase: "loading",
+        done: loaded,
+        total: target || loaded || 0,
+        label: target
+          ? `loading playlist… ${loaded} / ${target}`
+          : `loading playlist… ${loaded}`,
+      });
+
+      if (target != null && loaded >= Math.ceil(target * RATIO)) {
+        return {
+          loadedFully: true,
+          playlistVideoCount: target,
+          scrollPasses,
+          loadedCount: loaded,
+        };
+      }
+
+      if (loaded <= prev) {
+        stagnant += 1;
+        if (stagnant >= STAGNANT_LIMIT) break;
+      } else {
+        stagnant = 0;
+      }
+    }
+
+    // No reported target: stall / cap is best-effort complete.
+    // With a target: only claim full when we hit the 98% bar.
+    let loadedFully;
+    if (target == null) {
+      loadedFully = true;
+    } else {
+      loadedFully = loaded >= Math.ceil(target * RATIO) || loaded === target;
+    }
+
+    return {
+      loadedFully,
+      playlistVideoCount: target,
+      scrollPasses,
+      loadedCount: loaded,
+    };
+  }
+
   async function scrape() {
+    emitScanProgress({ phase: "page", done: 0, total: 0, label: "scanning…" });
+    let loadMeta = {
+      loadedFully: true,
+      playlistVideoCount: null,
+      scrollPasses: 0,
+      loadedCount: 0,
+    };
+    try {
+      loadMeta = await ensurePlaylistFullyLoaded();
+    } catch {
+      /* proceed with whatever is loaded */
+    }
     emitScanProgress({ phase: "page", done: 0, total: 0, label: "scanning…" });
     let items = scrapeFromYtInitialData();
     const fromData = items.length;
@@ -1444,7 +1627,14 @@
           .trim() || null;
     }
 
-    const playlistVideoCount = parsePlaylistVideoCount();
+    const playlistVideoCount =
+      loadMeta.playlistVideoCount != null
+        ? loadMeta.playlistVideoCount
+        : parsePlaylistVideoCount();
+    const loadedFully =
+      loadMeta.loadedFully === true ||
+      (playlistVideoCount != null &&
+        items.length >= Math.ceil(Number(playlistVideoCount) * 0.98));
 
     return {
       ok: true,
@@ -1460,6 +1650,9 @@
       channelsEnriched,
       datesEnriched,
       titlesEnriched,
+      loadedFully,
+      scrollPasses: loadMeta.scrollPasses || 0,
+      loadedCount: loadMeta.loadedCount || items.length,
     };
   }
 
@@ -1631,7 +1824,8 @@
     if (!videoId) return { ok: false, error: "missing videoId" };
     const row = await findRowByVideoIdResilient(videoId);
     if (!row) {
-      return { ok: false, error: `row not found for ${videoId} — scroll WL into view` };
+      // Already off Watch Later (or never loaded) — treat as success so Apply drops the mark
+      return { ok: true, alreadyGone: true };
     }
     row.scrollIntoView({ block: "center" });
     await sleep(150);

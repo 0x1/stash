@@ -528,6 +528,7 @@ function shouldPruneWatchLater(res) {
   if (!res?.isWatchLater) return false;
   const scraped = Number(res.count) || (Array.isArray(res.items) ? res.items.length : 0);
   if (scraped <= 0) return false;
+  if (res.loadedFully === true) return true;
   const plc = res.playlistVideoCount;
   if (plc != null && Number.isFinite(Number(plc))) {
     const n = Number(plc);
@@ -612,14 +613,26 @@ async function scan() {
   let pruneBit = "";
   if (res.isWatchLater) {
     if (pruneResult.pruned > 0) pruneBit = ` · pruned ${pruneResult.pruned} gone from WL`;
-    else if (pruneResult.skipped) pruneBit = " · kept stale (scroll fully then Scan)";
+    else if (pruneResult.skipped) pruneBit = " · kept stale (partial load)";
+  }
+  let loadBit = "";
+  if (res.source === "youtube" && (res.playlistVideoCount != null || res.loadedFully != null)) {
+    const got = res.count ?? 0;
+    const want = res.playlistVideoCount;
+    if (res.loadedFully || (want != null && got >= want)) {
+      loadBit = want != null ? ` · loaded ${got} / ${want}` : ` · loaded ${got}`;
+    } else if (want != null) {
+      loadBit = ` · partial ${got} / ${want} — scroll stalled`;
+    } else {
+      loadBit = ` · loaded ${got}`;
+    }
   }
   if (typeof StashScanProgress !== "undefined") {
     if (res.isWatchLater) StashScanProgress.setContext("Watch Later");
     else if (res.playlistTitle) StashScanProgress.setContext(res.playlistTitle);
     StashScanProgress.setDone({ brief: true });
   }
-  setStatus(`+${merged.added} new · ${res.count} on page${method}${enrichBit}${pruneBit}`);
+  setStatus(`+${merged.added} new · ${res.count} on page${method}${enrichBit}${pruneBit}${loadBit}`);
 }
 
 async function apply() {

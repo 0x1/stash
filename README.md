@@ -10,7 +10,7 @@ Tinder-like triage for **YouTube Watch Later** (X bookmarks secondary). Built fo
 ## Demo script (~90s)
 
 1. On YouTube: create a playlist named **`Maybe Watch Later`** (or pick any playlist in deck config).
-2. Open [Watch Later](https://www.youtube.com/playlist?list=WL) and scroll so rows are in the DOM.
+2. Open [Watch Later](https://www.youtube.com/playlist?list=WL) (Scan auto-scrolls to load the full list).
 3. Click the **stash** icon (side panel) → **Scan**.
 4. Side panel shows cover thumb + counts → **Open full deck**.
 5. On the deck: hammer keys
@@ -32,19 +32,21 @@ Tinder-like triage for **YouTube Watch Later** (X bookmarks secondary). Built fo
 
 Uncategorized items are left alone on Apply.
 
-## Watch Later sync (0.3.12)
+## Watch Later sync (0.3.13)
 
 Apply status explains **nothing to apply** (with live no/maybe/yes counts), confirms before changing YouTube, and notes when Yes stays on Watch Later (`yesMode: keep_wl`). Remove/add retries once after scrolling if a WL row is not yet in view.
 
-**Remove matching** accepts `Remove from Watch later`, `Remove from playlist`, or `Remove video` (most specific wins). On miss, Escape closes the menu and the error lists visible labels.
+**Remove matching** accepts `Remove from Watch later`, `Remove from playlist`, or `Remove video` (most specific wins). On miss, Escape closes the menu and the error lists visible labels. If the row is already gone from WL, remove returns `alreadyGone` and Apply drops the stash mark (no infinite retry).
+
+**Apply** removes matched videos from stash so a second Apply won’t re-hit them. Stale marks (already off Watch Later) clear with a status like `cleared N stale marks`.
 
 **Apply progress** — side panel is the primary live view while Apply focuses the WL tab. `#apply-progress` sits sticky under the header (thick bar, pulse while running). Progress is broadcast via `chrome.storage.local` key `stashApplyProgress` so deck ↔ side panel stay in sync. Deck keeps a widget too (with “also watching on side panel”). Apply tries `chrome.sidePanel.open` after focusing WL (best-effort).
 
-Scan on Watch Later **prunes** youtube items that left the playlist when the scrape looks complete (≥95% of reported playlist size, or a full `ytInitialData` dump). Apply also drops successfully removed/moved videos from stash so the pie matches live WL. Use **Clear stash** to wipe storage; **Reset triage** only clears marks.
+**Scan** auto-scrolls the playlist until unique video ids reach ~98% of the reported count (or scroll stalls / safety cap), with a live `loading playlist… N / M` bar. Status reports `loaded N / M` or `partial N / M — scroll stalled`. Scan on Watch Later **prunes** youtube items that left the playlist when the scrape looks complete (`loadedFully`, ≥95% of reported size, or a full `ytInitialData` dump). Use **Clear stash** to wipe storage; **Reset triage** only clears marks.
 
 ## Honesty / limits
 
-- **Scrape** uses `ytInitialData` when present, else DOM rows. YouTube A/B markup can miss views, publish date, or channel avatar.
+- **Scrape** auto-loads the playlist (scroll), then uses `ytInitialData` when present, else DOM rows. YouTube A/B markup can miss views, publish date, or channel avatar.
 - **Remove from Watch later / playlist** automates the English ⋮ menu (`Remove from Watch later`, `Remove from playlist`, `Remove video`). Non-English UI will fail until labels match.
 - **Add to playlist** is best-effort: Save menu → match by playlist id or exact name. Playlist discovery walks `ytInitialData` and may fetch `/feed/playlists`. No YouTube Data API key in this build.
 - X/Twitter scrape stays basic.

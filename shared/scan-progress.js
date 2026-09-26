@@ -107,6 +107,14 @@ const StashScanProgress = (() => {
   function applyMessage(msg) {
     if (!msg || msg.type !== "STASH_SCAN_PROGRESS") return;
     const phase = msg.phase;
+    if (phase === "loading") {
+      const d = Math.max(0, Number(msg.done) || 0);
+      const t = Math.max(0, Number(msg.total) || 0);
+      const statusText =
+        t > 0 ? `loading playlist… ${d} / ${t}` : `loading playlist… ${d || ""}`.trim();
+      setMeta(d, t || d, statusText);
+      return;
+    }
     if (phase === "page") {
       // Ignore shouty content-script labels — UI stays calm
       setScanning("scanning…");
