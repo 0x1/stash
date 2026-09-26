@@ -12,7 +12,7 @@ Tinder-like triage for **YouTube Watch Later** (X bookmarks secondary). Built fo
 1. On YouTube: create a playlist named **`Maybe Watch Later`** (or pick any playlist in deck config).
 2. Open [Watch Later](https://www.youtube.com/playlist?list=WL) (Scan auto-scrolls to load the full list).
 3. Click the **stash** icon (side panel) → **Scan**.
-4. Side panel shows cover thumb + counts → **Open full deck**.
+4. Side panel shows cover thumb + counts → **Start triage**.
 5. On the deck: hammer keys
    - **← / n / j** → no (default: remove from WL on Apply)
    - **→ / y / k** → maybe (add to Maybe playlist, then remove from WL)
@@ -31,6 +31,8 @@ Tinder-like triage for **YouTube Watch Later** (X bookmarks secondary). Built fo
 | `Esc` `Backspace` | undo last decision |
 
 Uncategorized items are left alone on Apply.
+
+**0.3.20** — Maybe Save-to-playlist: search/scroll the virtualized picker, case-insensitive name match, resolve playlist id from cache before Apply, clearer miss errors (visible names + scroll/search hint). Soft cache-miss preflight; config hint when default Maybe isn’t cached. Side panel **Start triage** (was Open full deck).
 
 **0.3.19** — Pause mid-scan (Scan morphs to Pause): keep what’s loaded, merge into stash, triage while the rest waits. Clearer per-phase stay-on-page tips when the Watch Later tab is hidden (`paused — focus Watch Later to keep loading` / `…to keep filling details`). Leaving the playlist mid-load finalizes a partial like Pause.
 
@@ -60,13 +62,13 @@ Apply status explains **nothing to apply** (with live no/maybe/yes counts), conf
 
 - **Scrape** auto-loads the playlist (scroll), then uses `ytInitialData` when present, else DOM rows. YouTube A/B markup can miss views, publish date, or channel avatar.
 - **Remove from Watch later / playlist** automates the English ⋮ menu (`Remove from Watch later`, `Remove from playlist`, `Remove video`). Non-English UI will fail until labels match.
-- **Add to playlist** is best-effort: Save menu → match by playlist id or exact name. Playlist discovery walks `ytInitialData` and may fetch `/feed/playlists`. No YouTube Data API key in this build.
+- **Add to playlist** is best-effort: Save menu → search/filter or scroll the virtualized list → match by playlist id or case-insensitive name. Playlist discovery walks `ytInitialData` and may fetch `/feed/playlists`. No YouTube Data API key in this build. Create **Maybe Watch Later** (or pick another) once in YouTube / deck ⚙.
 - X/Twitter scrape stays basic.
 
 ## Files
 
 - `deck.html` — primary triage UI + destination config
-- `sidepanel.html` — launcher + mini cover + Scan / Open deck / Apply
+- `sidepanel.html` — launcher + mini cover + Scan / Start triage / Apply
 - `content/youtube.js` — scrape + `STASH_REMOVE_FROM_WL` + `STASH_ADD_TO_PLAYLIST` + `STASH_LIST_PLAYLISTS`
 - `shared/storage.js` / `shared/apply.js` / `shared/apply-progress.js` — data model + apply orchestration + progress UI
 

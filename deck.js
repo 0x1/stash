@@ -223,10 +223,23 @@ function findPlaylistById(id) {
 
 function findPlaylistByName(name) {
   if (!name) return null;
-  const exact = playlists.find((p) => p.name === name);
-  if (exact) return exact;
-  const lower = name.toLowerCase();
-  return playlists.find((p) => p.name.toLowerCase() === lower) || null;
+  const norm =
+    typeof StashApply?.normalizePlaylistName === "function"
+      ? StashApply.normalizePlaylistName(name)
+      : String(name).replace(/\s+/g, " ").trim().toLowerCase();
+  if (!norm) return null;
+  return (
+    playlists.find((p) => {
+      const pn =
+        typeof StashApply?.normalizePlaylistName === "function"
+          ? StashApply.normalizePlaylistName(p?.name)
+          : String(p?.name || "")
+              .replace(/\s+/g, " ")
+              .trim()
+              .toLowerCase();
+      return pn === norm;
+    }) || null
+  );
 }
 
 function fillSelect(selectEl, { special, preferredId, preferredName }) {
@@ -348,7 +361,32 @@ function populatePlaylistSelects() {
   }
 
   syncOtherVisibility();
+  updateMaybeHint();
   updatePlaylistStatus();
+}
+
+function updateMaybeHint() {
+  const hint = document.getElementById("cfg-maybe-hint");
+  if (!hint) return;
+  const defaultName = "Maybe Watch Later";
+  const maybeName = (config.maybePlaylistName || defaultName).trim();
+  const maybeId = config.maybePlaylistId || "";
+  const stillDefault =
+    !maybeId &&
+    (!config.maybePlaylistName ||
+      (typeof StashApply?.normalizePlaylistName === "function"
+        ? StashApply.normalizePlaylistName(config.maybePlaylistName) ===
+          StashApply.normalizePlaylistName(defaultName)
+        : String(config.maybePlaylistName).trim().toLowerCase() === defaultName.toLowerCase()));
+  const known = maybeId
+    ? !!findPlaylistById(maybeId)
+    : !!findPlaylistByName(maybeName || defaultName);
+  const show = stillDefault && playlists.length > 0 && !known;
+  hint.hidden = !show;
+  if (show) {
+    hint.textContent =
+      "Create “Maybe Watch Later” on YouTube or choose another.";
+  }
 }
 
 function updatePlaylistStatus(extra) {
@@ -710,6 +748,17 @@ async function apply() {
     if (!ok) {
       setStatus("apply cancelled");
       return;
+    }
+  }
+
+  if (work.maybes > 0 && typeof StashApply.maybePlaylistPreflightMessage === "function") {
+    const warn = await StashApply.maybePlaylistPreflightMessage(stashConfig, work);
+    if (warn) {
+      const cont = confirm(warn);
+      if (!cont) {
+        setStatus("apply cancelled");
+        return;
+      }
     }
   }
 

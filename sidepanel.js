@@ -422,6 +422,17 @@ async function apply() {
     }
   }
 
+  if (work.maybes > 0 && typeof StashApply.maybePlaylistPreflightMessage === "function") {
+    const warn = await StashApply.maybePlaylistPreflightMessage(stashConfig, work);
+    if (warn) {
+      const cont = confirm(warn);
+      if (!cont) {
+        $("status").textContent = "apply cancelled";
+        return;
+      }
+    }
+  }
+
   $("btn-apply").disabled = true;
   $("status").textContent = "applying…";
   const total = work.nos + work.maybes + work.yeses;

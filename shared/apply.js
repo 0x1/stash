@@ -79,6 +79,88 @@
     return all.filter((i) => i.status === status && i.source === "youtube" && i.videoId);
   }
 
+  function normalizePlaylistName(s) {
+    return String(s || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  }
+
+  /** Prefer id; else case-insensitive trimmed name match in cached playlists. */
+  function findCachedPlaylist(playlists, playlistId, playlistName) {
+    const list = Array.isArray(playlists) ? playlists : [];
+    if (playlistId) {
+      const byId = list.find((p) => p && p.id === playlistId);
+      if (byId) return byId;
+    }
+    if (playlistName) {
+      const n = normalizePlaylistName(playlistName);
+      if (n) {
+        const byName = list.find((p) => normalizePlaylistName(p?.name) === n);
+        if (byName) return byName;
+      }
+    }
+    return null;
+  }
+
+  function resolvePlaylistDest(playlists, playlistId, playlistName, fallbackName) {
+    const name = (playlistName || fallbackName || "").trim();
+    const id = playlistId || "";
+    const hit = findCachedPlaylist(playlists, id, name);
+    if (hit) {
+      return {
+        playlistId: hit.id || id || "",
+        playlistName: (hit.name || name || "").trim(),
+      };
+    }
+    return { playlistId: id, playlistName: name };
+  }
+
+  /** Quiet STASH_LIST_PLAYLISTS + cache write. Returns playlists array (maybe empty). */
+  async function listPlaylistsQuiet() {
+    const existing = root.StashStorage?.getPlaylists
+      ? await root.StashStorage.getPlaylists()
+      : [];
+    const tab = await findYoutubeTab();
+    if (!tab?.id) return Array.isArray(existing) ? existing : [];
+    const ready = await ensureContentScript(tab.id);
+    if (!ready) return Array.isArray(existing) ? existing : [];
+    const res = await sendAction(tab.id, "STASH_LIST_PLAYLISTS", {});
+    if (res?.ok && Array.isArray(res.playlists)) {
+      if (root.StashStorage?.setPlaylists) {
+        try {
+          await root.StashStorage.setPlaylists(res.playlists);
+        } catch {
+          /* ignore */
+        }
+      }
+      return res.playlists;
+    }
+    return Array.isArray(existing) ? existing : [];
+  }
+
+  /**
+   * Soft preflight for maybe destination.
+   * @returns {Promise<null | string>} confirm message when cache misses; null to skip confirm.
+   */
+  async function maybePlaylistPreflightMessage(stashConfig, work) {
+    const cfg = stashConfig || {};
+    if (!work || !(work.maybes > 0) || cfg.applyAddsMaybe === false) return null;
+    let playlists = root.StashStorage?.getPlaylists
+      ? await root.StashStorage.getPlaylists()
+      : [];
+    if (!Array.isArray(playlists) || !playlists.length) {
+      playlists = await listPlaylistsQuiet();
+    }
+    const name = (cfg.maybePlaylistName || "Maybe Watch Later").trim();
+    const id = cfg.maybePlaylistId || "";
+    if (findCachedPlaylist(playlists, id, name)) return null;
+    return (
+      `No playlist "${name}" in cache. Apply will search/scroll the Save menu ` +
+      `(or pick one in deck ⚙). Continue anyway?`
+    );
+  }
+
   function resolveYesMode(cfg) {
     return cfg.yesMode === "playlist" || cfg.yesMode === "move_playlist" ? "playlist" : "keep_wl";
   }
@@ -418,8 +500,24 @@
       }
     }
 
-    const maybeName = cfg.maybePlaylistName || "Maybe Watch Later";
-    const maybeId = cfg.maybePlaylistId || "";
+    let playlistsCache = [];
+    try {
+      playlistsCache = root.StashStorage?.getPlaylists
+        ? await root.StashStorage.getPlaylists()
+        : [];
+    } catch {
+      playlistsCache = [];
+    }
+    if (!Array.isArray(playlistsCache)) playlistsCache = [];
+
+    const maybeResolved = resolvePlaylistDest(
+      playlistsCache,
+      cfg.maybePlaylistId || "",
+      cfg.maybePlaylistName || "",
+      "Maybe Watch Later"
+    );
+    const maybeName = maybeResolved.playlistName || "Maybe Watch Later";
+    const maybeId = maybeResolved.playlistId || "";
     if (maybes.length) {
       for (const it of maybes) {
         emit({
@@ -471,8 +569,14 @@
     }
 
     if (yeses.length) {
-      const yesName = cfg.yesPlaylistName || "Stash Yes";
-      const yesId = cfg.yesPlaylistId || "";
+      const yesResolved = resolvePlaylistDest(
+        playlistsCache,
+        cfg.yesPlaylistId || "",
+        cfg.yesPlaylistName || "",
+        "Stash Yes"
+      );
+      const yesName = yesResolved.playlistName || "Stash Yes";
+      const yesId = yesResolved.playlistId || "";
       for (const it of yeses) {
         emit({
           phase: "yes",
@@ -561,5 +665,10 @@
     findYoutubeTab,
     countApplyWork,
     formatApplyStatus,
+    findCachedPlaylist,
+    resolvePlaylistDest,
+    listPlaylistsQuiet,
+    maybePlaylistPreflightMessage,
+    normalizePlaylistName,
   };
 })(typeof globalThis !== "undefined" ? globalThis : window);

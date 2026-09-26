@@ -2297,20 +2297,187 @@
     return null;
   }
 
+  function normalizePlaylistName(s) {
+    return String(s || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  }
+
+  function playlistNamesEqual(a, b) {
+    const na = normalizePlaylistName(a);
+    const nb = normalizePlaylistName(b);
+    return !!na && !!nb && na === nb;
+  }
+
+  function candidatePlaylistLabel(el) {
+    if (!el) return "";
+    const label =
+      el.querySelector?.("#label") ||
+      el.querySelector?.("yt-formatted-string") ||
+      el.querySelector?.("[id*='title']") ||
+      el.querySelector?.("[class*='title']");
+    if (label) {
+      const lab = textOf(label);
+      if (lab) return lab;
+    }
+    return textOf(el);
+  }
+
   function matchPlaylistCandidate(el, playlistId, playlistName) {
-    const t = textOf(el);
     const id = playlistIdFromEl(el);
     if (playlistId && id && id === playlistId) return true;
     if (playlistName) {
-      if (t === playlistName) return true;
-      // Prefer exact label match over includes for short names
-      const label =
-        el.querySelector?.("#label") ||
-        el.querySelector?.("yt-formatted-string") ||
-        el.querySelector?.("[id*='title']");
-      if (label && textOf(label) === playlistName) return true;
+      const lab = candidatePlaylistLabel(el);
+      if (playlistNamesEqual(lab, playlistName)) return true;
+      // Whole-element text can include private/video-count noise — still try exact normalize
+      if (playlistNamesEqual(textOf(el), playlistName)) return true;
     }
     return false;
+  }
+
+  const PICKER_ROOT_SELECTORS =
+    "ytd-add-to-playlist-renderer, yt-sheet-view-model, tp-yt-paper-dialog, " +
+    "ytd-playlist-add-to-option-renderer, [aria-label*='Save to'], [aria-label*='Add to']";
+
+  const PICKER_CANDIDATE_SELECTORS =
+    "ytd-playlist-add-to-option-renderer, tp-yt-paper-checkbox, yt-list-item-view-model, " +
+    "[role='checkbox'], ytd-compact-playlist-renderer, yt-lockup-view-model";
+
+  function getPickerRoots() {
+    return [...document.querySelectorAll(PICKER_ROOT_SELECTORS)].filter(
+      (el) =>
+        visible(el) &&
+        !el.closest?.("ytd-guide-renderer, #guide-content, ytd-mini-guide-renderer")
+    );
+  }
+
+  function collectPickerCandidates(pickerRoots) {
+    const searchRoots = pickerRoots.length ? pickerRoots : [document];
+    const candidates = [];
+    const seenCand = new Set();
+    for (const root of searchRoots) {
+      for (const el of root.querySelectorAll(PICKER_CANDIDATE_SELECTORS)) {
+        if (!visible(el) || seenCand.has(el)) continue;
+        if (el.closest?.("ytd-guide-renderer, #guide-content, ytd-mini-guide-renderer")) continue;
+        seenCand.add(el);
+        candidates.push(el);
+      }
+    }
+    return candidates;
+  }
+
+  function findMatchInCandidates(candidates, playlistId, playlistName) {
+    if (playlistId) {
+      const byId = candidates.find((el) => matchPlaylistCandidate(el, playlistId, null));
+      if (byId) return byId;
+    }
+    if (playlistName) {
+      const byName = candidates.find((el) => matchPlaylistCandidate(el, null, playlistName));
+      if (byName) return byName;
+    }
+    return null;
+  }
+
+  function visiblePickerPlaylistNames(candidates, limit = 5) {
+    const labels = [];
+    const seen = new Set();
+    for (const el of candidates) {
+      const lab = candidatePlaylistLabel(el);
+      const key = normalizePlaylistName(lab);
+      if (!key || seen.has(key)) continue;
+      // Skip huge blobs (row text dumping everything)
+      if (lab.length > 80) continue;
+      seen.add(key);
+      labels.push(lab.replace(/\s+/g, " ").trim());
+      if (labels.length >= limit) break;
+    }
+    return labels;
+  }
+
+  function findPlaylistSearchInput(pickerRoots) {
+    const roots = pickerRoots.length ? pickerRoots : [document];
+    const selectors = [
+      'input[placeholder*="Search" i]',
+      'input[placeholder*="Find" i]',
+      'input[placeholder*="Filter" i]',
+      "#search-input input",
+      "#search-input",
+      "tp-yt-paper-input input",
+      "yt-search-query-input input",
+      'input[type="text"]',
+      'input[type="search"]',
+    ];
+    for (const root of roots) {
+      for (const sel of selectors) {
+        let nodes;
+        try {
+          nodes = root.querySelectorAll(sel);
+        } catch {
+          continue;
+        }
+        for (const el of nodes) {
+          const input =
+            el.tagName === "INPUT"
+              ? el
+              : el.querySelector?.("input") || null;
+          if (input && visible(input) && !input.disabled) return input;
+        }
+      }
+    }
+    return null;
+  }
+
+  function setNativeInputValue(input, value) {
+    const proto = window.HTMLInputElement?.prototype;
+    const desc = proto && Object.getOwnPropertyDescriptor(proto, "value");
+    if (desc?.set) desc.set.call(input, value);
+    else input.value = value;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  async function typePlaylistSearch(input, playlistName) {
+    if (!input || !playlistName) return false;
+    input.focus();
+    setNativeInputValue(input, "");
+    await sleep(50);
+    setNativeInputValue(input, playlistName);
+    // Some YT inputs listen for KeyboardEvent / InputEvent
+    try {
+      input.dispatchEvent(
+        new InputEvent("input", { bubbles: true, data: playlistName, inputType: "insertText" })
+      );
+    } catch {
+      /* older */
+    }
+    await sleep(350);
+    return true;
+  }
+
+  function findScrollableInPicker(pickerRoots) {
+    const roots = pickerRoots.length ? pickerRoots : [];
+    const candidates = [];
+    for (const root of roots) {
+      candidates.push(root);
+      for (const el of root.querySelectorAll("div, section, tp-yt-paper-dialog, #playlists, #items")) {
+        candidates.push(el);
+      }
+    }
+    let best = null;
+    let bestOverflow = 0;
+    for (const el of candidates) {
+      if (!visible(el)) continue;
+      const style = window.getComputedStyle(el);
+      const oy = style.overflowY;
+      if (oy !== "auto" && oy !== "scroll" && oy !== "overlay") continue;
+      const overflow = el.scrollHeight - el.clientHeight;
+      if (overflow > bestOverflow && el.clientHeight > 40) {
+        bestOverflow = overflow;
+        best = el;
+      }
+    }
+    return best;
   }
 
   async function addToPlaylist(videoId, playlistName, playlistId) {
@@ -2357,61 +2524,108 @@
       saveItem.closest("[role='menuitem']") ||
       saveItem;
     saveClick.click();
-    await sleep(300);
+    await sleep(350);
 
-    const start = Date.now();
+    // Wait briefly for Save / add-to panel
+    const panelWaitStart = Date.now();
+    let pickerRoots = [];
+    while (Date.now() - panelWaitStart < MENU_TIMEOUT_MS) {
+      pickerRoots = getPickerRoots();
+      if (pickerRoots.length || collectPickerCandidates(pickerRoots).length) break;
+      await sleep(80);
+    }
+
     let playlistEl = null;
-    // Prefer candidates inside the Save / add-to playlist panel (not the guide)
-    const pickerRootSelectors =
-      "ytd-add-to-playlist-renderer, yt-sheet-view-model, tp-yt-paper-dialog, " +
-      "ytd-playlist-add-to-option-renderer, [aria-label*='Save to'], [aria-label*='Add to']";
-    while (Date.now() - start < MENU_TIMEOUT_MS) {
-      const pickerRoots = [...document.querySelectorAll(pickerRootSelectors)].filter(
-        (el) =>
-          visible(el) &&
-          !el.closest?.("ytd-guide-renderer, #guide-content, ytd-mini-guide-renderer")
-      );
-      const searchRoots = pickerRoots.length ? pickerRoots : [document];
-      const candidates = [];
-      const seenCand = new Set();
-      for (const root of searchRoots) {
-        for (const el of root.querySelectorAll(
-          "ytd-playlist-add-to-option-renderer, tp-yt-paper-checkbox, yt-list-item-view-model, [role='checkbox'], ytd-compact-playlist-renderer, yt-lockup-view-model"
-        )) {
-          if (!visible(el) || seenCand.has(el)) continue;
-          if (el.closest?.("ytd-guide-renderer, #guide-content, ytd-mini-guide-renderer")) continue;
-          seenCand.add(el);
-          candidates.push(el);
+    let candidates = collectPickerCandidates(pickerRoots);
+
+    // 1) Immediate match among currently rendered (virtualized) rows
+    playlistEl = findMatchInCandidates(candidates, playlistId, playlistName);
+
+    // 2) Type into search/filter if present — virtualized lists often need this
+    if (!playlistEl && playlistName) {
+      pickerRoots = getPickerRoots();
+      const searchInput = findPlaylistSearchInput(pickerRoots);
+      if (searchInput) {
+        await typePlaylistSearch(searchInput, playlistName);
+        const searchStart = Date.now();
+        while (Date.now() - searchStart < 2000) {
+          pickerRoots = getPickerRoots();
+          candidates = collectPickerCandidates(pickerRoots);
+          playlistEl = findMatchInCandidates(candidates, playlistId, playlistName);
+          if (playlistEl) break;
+          await sleep(120);
         }
       }
+    }
 
-      // Prefer id match, then exact name
-      if (playlistId) {
-        playlistEl = candidates.find((el) => matchPlaylistCandidate(el, playlistId, null));
+    // 3) Scroll the picker list in steps to force virtualization to render more rows
+    if (!playlistEl) {
+      pickerRoots = getPickerRoots();
+      const scroller = findScrollableInPicker(pickerRoots);
+      if (scroller) {
+        const maxSteps = 25;
+        let lastTop = -1;
+        for (let step = 0; step < maxSteps && !playlistEl; step++) {
+          pickerRoots = getPickerRoots();
+          candidates = collectPickerCandidates(pickerRoots);
+          playlistEl = findMatchInCandidates(candidates, playlistId, playlistName);
+          if (playlistEl) break;
+          const before = scroller.scrollTop;
+          scroller.scrollTop = Math.min(
+            scroller.scrollTop + Math.max(120, Math.floor(scroller.clientHeight * 0.85)),
+            scroller.scrollHeight
+          );
+          // Also nudge via scrollIntoView on last candidate
+          if (candidates.length) {
+            candidates[candidates.length - 1].scrollIntoView({ block: "end" });
+          }
+          await sleep(180);
+          if (scroller.scrollTop === before || scroller.scrollTop === lastTop) {
+            // try one more full jump to end
+            if (scroller.scrollTop < scroller.scrollHeight - scroller.clientHeight - 2) {
+              scroller.scrollTop = scroller.scrollHeight;
+              await sleep(200);
+              continue;
+            }
+            break;
+          }
+          lastTop = scroller.scrollTop;
+        }
+        // Final pass after scroll
+        if (!playlistEl) {
+          pickerRoots = getPickerRoots();
+          candidates = collectPickerCandidates(pickerRoots);
+          playlistEl = findMatchInCandidates(candidates, playlistId, playlistName);
+        }
+      } else {
+        // No dedicated scroller — brief re-poll (panel may still be mounting)
+        const pollStart = Date.now();
+        while (Date.now() - pollStart < MENU_TIMEOUT_MS && !playlistEl) {
+          pickerRoots = getPickerRoots();
+          candidates = collectPickerCandidates(pickerRoots);
+          playlistEl = findMatchInCandidates(candidates, playlistId, playlistName);
+          if (playlistEl) break;
+          await sleep(100);
+        }
       }
-      if (!playlistEl && playlistName) {
-        playlistEl = candidates.find((el) => {
-          const t = textOf(el);
-          const label =
-            el.querySelector?.("#label") ||
-            el.querySelector?.("yt-formatted-string") ||
-            el.querySelector?.("[id*='title']");
-          const lab = label ? textOf(label) : "";
-          return lab === playlistName || t === playlistName;
-        });
-      }
-      if (!playlistEl && playlistName) {
-        playlistEl = candidates.find((el) => textOf(el).includes(playlistName));
-      }
-      if (playlistEl) break;
+    }
 
-      const labels = [...document.querySelectorAll("#label, yt-formatted-string, span, a")].filter(visible);
+    // 4) Fallback: label nodes (id / normalized name)
+    if (!playlistEl) {
+      const labels = [...document.querySelectorAll("#label, yt-formatted-string, span, a")].filter(
+        visible
+      );
       let lab = null;
       if (playlistId) {
-        lab = labels.find((el) => playlistIdFromEl(el) === playlistId || playlistIdFromEl(el.closest("a, div, ytd-playlist-add-to-option-renderer")) === playlistId);
+        lab = labels.find(
+          (el) =>
+            playlistIdFromEl(el) === playlistId ||
+            playlistIdFromEl(el.closest("a, div, ytd-playlist-add-to-option-renderer")) ===
+              playlistId
+        );
       }
       if (!lab && playlistName) {
-        lab = labels.find((el) => textOf(el) === playlistName);
+        lab = labels.find((el) => playlistNamesEqual(textOf(el), playlistName));
       }
       if (lab) {
         playlistEl =
@@ -2420,18 +2634,20 @@
           lab.closest("tp-yt-paper-checkbox") ||
           lab.closest("yt-list-item-view-model") ||
           lab;
-        break;
       }
-      await sleep(100);
     }
 
     if (!playlistEl) {
       pressEscape();
+      pickerRoots = getPickerRoots();
+      candidates = collectPickerCandidates(pickerRoots);
+      const saw = visiblePickerPlaylistNames(candidates, 5);
       const label = playlistName || playlistId || "?";
+      const listed = saw.length ? saw.join(" · ") : "(none visible)";
       return {
         ok: false,
         needsApi: true,
-        error: `Playlist "${label}" not visible — create it on YouTube first`,
+        error: `Playlist "${label}" not in Save list (saw: ${listed}). Try scroll/search Save list or re-pick in ⚙.`,
       };
     }
 
