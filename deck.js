@@ -550,9 +550,9 @@ function applyWatchLaterPrune(items, res) {
 
 async function scan() {
   if (typeof StashScanProgress !== "undefined") {
-    StashScanProgress.setScanning("scanning…");
+    StashScanProgress.setScanning("keep Watch Later tab focused");
   } else {
-    setStatus("scanning…");
+    setStatus("keep Watch Later tab focused");
   }
   const findTab = StashTabs?.findYoutubeTab || StashApply?.findYoutubeTab;
   const tab = findTab ? await findTab() : (await chrome.tabs.query({ active: true, currentWindow: true }))[0];

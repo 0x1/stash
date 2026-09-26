@@ -1171,17 +1171,56 @@
   }
 
 
-  function emitScanProgress({ phase, done = 0, total = 0, label = "" } = {}) {
+  function emitScanProgress({
+    phase,
+    done = 0,
+    total = 0,
+    label = "",
+    needTotal = null,
+    paused = false,
+  } = {}) {
     try {
-      chrome.runtime.sendMessage(
-        { type: "STASH_SCAN_PROGRESS", phase, done, total, label },
-        () => {
-          void chrome.runtime.lastError;
-        }
-      );
+      const msg = { type: "STASH_SCAN_PROGRESS", phase, done, total, label };
+      if (needTotal != null) msg.needTotal = needTotal;
+      if (paused) msg.paused = true;
+      chrome.runtime.sendMessage(msg, () => {
+        void chrome.runtime.lastError;
+      });
     } catch {
       /* no listener / extension context gone */
     }
+  }
+
+  function isDocumentVisible() {
+    try {
+      return !document.hidden && document.visibilityState === "visible";
+    } catch {
+      return true;
+    }
+  }
+
+  /** Pause until the WL tab is focused again (or maxMs). Does not claim load success. */
+  function waitUntilTabVisible({ maxMs = 10 * 60 * 1000 } = {}) {
+    if (isDocumentVisible()) return Promise.resolve({ timedOut: false });
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (timedOut) => {
+        if (done) return;
+        done = true;
+        try {
+          document.removeEventListener("visibilitychange", onVis);
+        } catch {
+          /* ignore */
+        }
+        clearTimeout(timer);
+        resolve({ timedOut: !!timedOut });
+      };
+      const onVis = () => {
+        if (isDocumentVisible()) finish(false);
+      };
+      document.addEventListener("visibilitychange", onVis);
+      const timer = setTimeout(() => finish(true), Math.max(1000, Number(maxMs) || 0));
+    });
   }
 
   async function enrichMissingMeta(items, { cap = 5000, concurrency = 6, onProgress = null } = {}) {
@@ -1235,6 +1274,27 @@
 
     async function worker() {
       while (idx < queue.length) {
+        if (!isDocumentVisible()) {
+          try {
+            onProgress?.(completed, queue.length, needTotal);
+          } catch {
+            /* ignore */
+          }
+          emitScanProgress({
+            phase: "meta",
+            done: completed,
+            total: queue.length,
+            needTotal,
+            paused: true,
+            label: "paused — focus Watch Later tab",
+          });
+          const { timedOut } = await waitUntilTabVisible({ maxMs: 10 * 60 * 1000 });
+          if (timedOut && !isDocumentVisible()) {
+            // Stop queue early; scrape keeps whatever meta we have so far.
+            idx = queue.length;
+            break;
+          }
+        }
         const i = idx++;
         const it = queue[i];
         try {
@@ -1296,34 +1356,65 @@
 
 
   function parsePlaylistVideoCount() {
-    // Prefer playlist header / sidebar "N videos" text, then ytInitialData fields.
-    const candidates = [];
+    // Collect every plausible "N videos" on the WL/playlist page and prefer the
+    // largest — first-match selectors can miss the sidebar header (e.g. 4972)
+    // and pick a smaller unrelated figure.
+    const found = [];
+    const pushN = (n) => {
+      if (!Number.isFinite(n) || n < 0 || n > 200000) return;
+      found.push(n);
+    };
+    const pushFromText = (t, { allowTitleParen = false } = {}) => {
+      if (!t) return;
+      const s = String(t).replace(/\s+/g, " ").trim();
+      if (!s) return;
+      const reVideos = /([\d,]+)\s*videos?\b/gi;
+      let m;
+      while ((m = reVideos.exec(s))) {
+        pushN(parseInt(m[1].replace(/,/g, ""), 10));
+      }
+      if (allowTitleParen) {
+        const tp = s.match(/^\(([\d,]+)\)/);
+        if (tp) pushN(parseInt(tp[1].replace(/,/g, ""), 10));
+      }
+    };
+
     const sel = [
       "ytd-playlist-sidebar-primary-info-renderer #stats yt-formatted-string",
+      "ytd-playlist-sidebar-primary-info-renderer #stats",
       "ytd-playlist-header-renderer .metadata-stats",
       "ytd-playlist-header-renderer yt-formatted-string",
+      "ytd-playlist-byline-renderer",
       "#page-header .yt-content-metadata-view-model__metadata-row",
+      "#page-header yt-formatted-string",
       "yt-page-header-view-model .yt-content-metadata-view-model__metadata-text",
+      "yt-page-header-view-model .yt-content-metadata-view-model__metadata-row",
       "#publisher-container yt-formatted-string",
+      "ytd-badge-supported-renderer",
     ];
     for (const s of sel) {
       for (const el of document.querySelectorAll(s)) {
-        const t = (el.textContent || "").replace(/\s+/g, " ").trim();
-        if (t) candidates.push(t);
+        pushFromText(el.textContent || "");
       }
     }
-    // Title often "(35) Watch Later - YouTube"
-    if (document.title) candidates.push(document.title);
-    for (const t of candidates) {
-      const m =
-        t.match(/([\d,]+)\s*videos?/i) ||
-        t.match(/^\((\d+)\)/) ||
-        t.match(/\b([\d,]+)\s*video\b/i);
-      if (m) {
-        const n = parseInt(m[1].replace(/,/g, ""), 10);
-        if (Number.isFinite(n) && n >= 0) return n;
+    // Broader pass: any visible "N videos" near playlist chrome (not row metadata).
+    try {
+      const roots = [
+        document.querySelector("ytd-playlist-sidebar-renderer"),
+        document.querySelector("ytd-playlist-header-renderer"),
+        document.querySelector("yt-page-header-renderer"),
+        document.querySelector("#page-header"),
+        document.querySelector("ytd-browse[page-subtype='playlist']"),
+      ].filter(Boolean);
+      for (const root of roots) {
+        pushFromText(root.innerText || root.textContent || "");
       }
+    } catch {
+      /* ignore */
     }
+    // Title often "(4972) Watch Later - YouTube"
+    if (document.title) pushFromText(document.title, { allowTitleParen: true });
+
     try {
       const data = getYtInitialData();
       if (data) {
@@ -1341,14 +1432,9 @@
           ];
           for (const raw of texts) {
             const t = textFromRuns(raw) || (typeof raw === "string" ? raw : null);
-            if (!t) continue;
-            const m = String(t).match(/([\d,]+)\s*videos?/i);
-            if (m) {
-              const n = parseInt(m[1].replace(/,/g, ""), 10);
-              if (Number.isFinite(n) && n >= 0) return n;
-            }
+            if (t) pushFromText(t);
           }
-          if (typeof cur.numVideos === "number" && cur.numVideos >= 0) return cur.numVideos;
+          if (typeof cur.numVideos === "number") pushN(cur.numVideos);
           if (Array.isArray(cur)) {
             for (const x of cur) stack.push(x);
           } else {
@@ -1362,7 +1448,9 @@
     } catch {
       /* ignore */
     }
-    return null;
+
+    if (!found.length) return null;
+    return Math.max(...found);
   }
 
 
@@ -1481,14 +1569,17 @@
     let loaded = accumulated.size;
     let scrollPasses = 0;
     let stagnant = 0;
+    let pausedOut = false;
     const targetOrDefault = target || 2000;
     // Scale with header count so ~5k WL lists can finish (~15 rows/scroll estimate).
     const MAX_SCROLLS = Math.min(600, Math.max(120, Math.ceil(targetOrDefault / 15)));
     const STAGNANT_LIMIT = 10;
     const RATIO = 0.98;
-    const started = Date.now();
+    let started = Date.now();
     // Enough wall time for ~5k: ~40ms/video soft floor, min 90s, max 15 min.
+    // Paused (hidden-tab) time is excluded from this budget below.
     const MAX_MS = Math.min(15 * 60 * 1000, Math.max(90_000, targetOrDefault * 40));
+    const PAUSE_MAX_MS = 10 * 60 * 1000;
 
     const isPlaylistPage =
       /[?&]list=/i.test(location.href) ||
@@ -1504,14 +1595,22 @@
       };
     }
 
-    emitScanProgress({
-      phase: "loading",
-      done: loaded,
-      total: target || loaded || 0,
-      label: target
-        ? `loading playlist… ${loaded} / ${target}`
-        : `loading playlist… ${loaded}`,
-    });
+    const emitLoading = (paused = false) => {
+      const total = target || loaded || 0;
+      emitScanProgress({
+        phase: "loading",
+        done: loaded,
+        total,
+        paused,
+        label: paused
+          ? "paused — focus Watch Later tab"
+          : target
+            ? `loading playlist… ${loaded} / ${target}`
+            : `loading playlist… ${loaded}`,
+      });
+    };
+
+    emitLoading(false);
 
     // Already complete?
     if (target != null && loaded >= target * RATIO) {
@@ -1524,6 +1623,22 @@
     }
 
     while (scrollPasses < MAX_SCROLLS && Date.now() - started < MAX_MS) {
+      // Background tabs throttle timers/scroll — pause until WL is focused again.
+      if (!isDocumentVisible()) {
+        emitLoading(true);
+        const pauseStarted = Date.now();
+        const { timedOut } = await waitUntilTabVisible({ maxMs: PAUSE_MAX_MS });
+        // Don't burn scroll wall-clock while the user had another tab focused.
+        started += Date.now() - pauseStarted;
+        if (timedOut && !isDocumentVisible()) {
+          // Do NOT claim loadedFully just because we waited out a hidden tab.
+          pausedOut = true;
+          break;
+        }
+        emitLoading(false);
+        continue;
+      }
+
       const prev = loaded;
       if (stagnant > 0 && stagnant % 2 === 1) {
         scrollPlaylistAlternate();
@@ -1539,14 +1654,7 @@
       for (const id of countLoadedPlaylistVideoIds()) accumulated.add(id);
       loaded = accumulated.size;
 
-      emitScanProgress({
-        phase: "loading",
-        done: loaded,
-        total: target || loaded || 0,
-        label: target
-          ? `loading playlist… ${loaded} / ${target}`
-          : `loading playlist… ${loaded}`,
-      });
+      emitLoading(false);
 
       if (target != null && loaded >= Math.ceil(target * RATIO)) {
         return {
@@ -1567,8 +1675,11 @@
 
     // No reported target: stall / cap is best-effort complete.
     // With a target: only claim full when we hit the 98% bar.
+    // Hidden-tab timeout must never flip loadedFully true.
     let loadedFully;
-    if (target == null) {
+    if (pausedOut) {
+      loadedFully = false;
+    } else if (target == null) {
       loadedFully = true;
     } else {
       loadedFully = loaded >= Math.ceil(target * RATIO) || loaded === target;
@@ -1665,7 +1776,8 @@
           phase: "meta",
           done: 0,
           total: enrichCap,
-          label: `scanning meta… 0 / ${enrichCap}`,
+          needTotal: needEstimate,
+          label: `filling details… 0 / ${enrichCap}`,
         });
       }
       const er = await enrichMissingMeta(items, {
@@ -1679,7 +1791,8 @@
             phase: "meta",
             done,
             total: denom,
-            label: `scanning meta… ${done} / ${denom}${ofBit}`,
+            needTotal,
+            label: `filling details… ${done} / ${denom}${ofBit}`,
           });
         },
       });

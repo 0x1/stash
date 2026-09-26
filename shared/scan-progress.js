@@ -110,8 +110,12 @@ const StashScanProgress = (() => {
     if (phase === "loading") {
       const d = Math.max(0, Number(msg.done) || 0);
       const t = Math.max(0, Number(msg.total) || 0);
-      const statusText =
-        t > 0 ? `loading playlist… ${d} / ${t}` : `loading playlist… ${d || ""}`.trim();
+      const paused =
+        msg.paused === true || /paused/i.test(String(msg.label || ""));
+      // Count under the bar; status stays a calm verb (or pause tip).
+      const statusText = paused
+        ? "paused — focus Watch Later tab"
+        : "loading playlist…";
       setMeta(d, t || d, statusText);
       return;
     }
@@ -121,8 +125,20 @@ const StashScanProgress = (() => {
       return;
     }
     if (phase === "meta") {
-      // Prefer our calm status; ignore shouty content-script labels
-      setMeta(msg.done, msg.total, null);
+      const d = Math.max(0, Number(msg.done) || 0);
+      const t = Math.max(0, Number(msg.total) || 0);
+      const need = Math.max(0, Number(msg.needTotal) || 0);
+      const paused =
+        msg.paused === true || /paused/i.test(String(msg.label || ""));
+      const statusText = paused
+        ? "paused — focus Watch Later tab"
+        : "filling details…";
+      setMeta(d, t, statusText);
+      // Optional honesty when soft-cap truncates enrich queue vs full need set.
+      const { label } = els();
+      if (label && t > 0 && need > t) {
+        label.textContent = `${d} / ${t} (of ${need})`;
+      }
       return;
     }
     if (phase === "done") {

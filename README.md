@@ -32,6 +32,8 @@ Tinder-like triage for **YouTube Watch Later** (X bookmarks secondary). Built fo
 
 Uncategorized items are left alone on Apply.
 
+**0.3.18** — Pause WL scroll when the tab is hidden; clearer loading / filling-details progress; prefer largest playlist header count.
+
 **0.3.17** — Fix the side-panel pie card after clearing the stash.
 
 **0.3.16** — Clarify button tooltips and triage confirmation dialogs.
@@ -50,7 +52,7 @@ Apply status explains **nothing to apply** (with live no/maybe/yes counts), conf
 
 **Apply progress** — side panel is the primary live view while Apply focuses the WL tab. `#apply-progress` sits sticky under the header (thick bar, pulse while running). Progress is broadcast via `chrome.storage.local` key `stashApplyProgress` so deck ↔ side panel stay in sync. Deck keeps a widget too (with “also watching on side panel”). Apply tries `chrome.sidePanel.open` after focusing WL (best-effort).
 
-**Scan** auto-scrolls the playlist until unique video ids reach ~98% of the reported count (or scroll stalls / safety cap), with a live `loading playlist… N / M` bar. Scroll/time budgets scale with the header count (enough for ~5k Watch Later), accumulate ids across passes, and nudge harder before declaring stall. Status reports `loaded N / M · meta N` or `partial N / M — scroll stalled` so gaps vs YouTube’s count stay obvious. Meta enrich runs up to 5k with progress against the real need set (`scanning meta… N / M`). Scan on Watch Later **prunes** youtube items that left the playlist when the scrape looks complete (`loadedFully`, ≥95% of reported size, or a full `ytInitialData` dump). Use **Clear stash** to wipe storage; **Reset triage** only clears marks.
+**Scan** auto-scrolls the playlist until unique video ids reach ~98% of the reported count (or scroll stalls / safety cap), with a live `loading playlist… N / M` bar. Scroll/time budgets scale with the header count (enough for ~5k Watch Later), accumulate ids across passes, and nudge harder before declaring stall. Status reports `loaded N / M · meta N` or `partial N / M — scroll stalled` so gaps vs YouTube’s count stay obvious. Meta enrich runs up to 5k with progress against the real need set (`filling details… N / M`). Leaving the Watch Later tab pauses auto-scroll (status: `paused — focus Watch Later tab`) so Chrome background throttling doesn’t silently short the scrape. Scan on Watch Later **prunes** youtube items that left the playlist when the scrape looks complete (`loadedFully`, ≥95% of reported size, or a full `ytInitialData` dump). Use **Clear stash** to wipe storage; **Reset triage** only clears marks.
 
 ## Honesty / limits
 
