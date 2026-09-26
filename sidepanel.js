@@ -416,7 +416,7 @@ async function saveTimeBudgetFromInput() {
 }
 
 async function resetTriage() {
-  if (!confirm("Reset marks only (does not delete videos from stash)?")) return;
+  if (!confirm("Clear all marks? Videos stay.")) return;
   const { stashItems } = await StashStorage.getAll();
   const items = { ...stashItems };
   let n = 0;
@@ -434,7 +434,7 @@ async function resetTriage() {
 }
 
 async function clearStash() {
-  if (!confirm("Clear entire stash? This deletes all scraped videos from Stash (not from YouTube).")) return;
+  if (!confirm("Wipe Stash? Scan again to refill.")) return;
   await StashStorage.setItems({});
   await StashStorage.setUndo([]);
   await refresh();

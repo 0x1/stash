@@ -737,7 +737,7 @@ document.addEventListener("keydown", (e) => {
 
 
 async function resetTriage() {
-  if (!confirm("Reset marks only (does not delete videos from stash)?")) return;
+  if (!confirm("Clear all marks? Videos stay.")) return;
   let n = 0;
   for (const id of Object.keys(items)) {
     const st = items[id]?.status;
@@ -754,7 +754,7 @@ async function resetTriage() {
 }
 
 async function clearStashData() {
-  if (!confirm("Clear entire stash? This deletes all scraped videos from Stash (not from YouTube).")) return;
+  if (!confirm("Wipe Stash? Scan again to refill.")) return;
   items = {};
   undoStack = [];
   await StashStorage.setItems({});

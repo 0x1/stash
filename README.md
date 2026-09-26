@@ -32,6 +32,8 @@ Tinder-like triage for **YouTube Watch Later** (X bookmarks secondary). Built fo
 
 Uncategorized items are left alone on Apply.
 
+**0.3.16** — Clarify button tooltips and triage confirmation dialogs.
+
 ## Watch Later sync (0.3.15)
 
 **Duration totals** compact when ≥24h (`5w 5d 10h`); hover `title` shows exact hours (`970h 17m`).
