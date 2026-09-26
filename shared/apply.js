@@ -143,12 +143,18 @@
     return msg;
   }
 
+  function itemLabel(it) {
+    const title = (it?.title || "").replace(/\s+/g, " ").trim();
+    if (title) return title.length > 42 ? title.slice(0, 41) + "…" : title;
+    return it?.videoId || "?";
+  }
+
   /**
-   * @param {{ onProgress?: (msg: string) => void }} opts
+   * @param {{ onProgress?: (msg: string | object) => void }} opts
    * @returns {Promise<{ok:boolean, removed:number, maybeAdded:number, maybeMoved:number, yesMoved:number, failed:string[], needWlTab?:boolean, nothingToApply?:boolean, markedNo?:number, markedMaybe?:number, markedYes?:number, yesMode?:string, error?:string}>}
    */
   async function applyDecisions(opts = {}) {
-    const progress = opts.onProgress || (() => {});
+    const onProgress = opts.onProgress || (() => {});
     const { stashItems, stashConfig } = await root.StashStorage.getAll();
     const cfg = stashConfig;
     const all = Object.values(stashItems);
@@ -159,6 +165,34 @@
     const yesMode = work.yesMode;
     const yeses =
       cfg.applyHandlesYes && yesMode === "playlist" ? ytMarked(all, "yes") : [];
+
+    const total = nos.length + maybes.length + yeses.length;
+    const failed = [];
+    let removed = 0;
+    let maybeAdded = 0;
+    let maybeMoved = 0;
+    let yesMoved = 0;
+    let done = 0;
+
+    function emit(partial) {
+      const payload = {
+        phase: partial.phase || "running",
+        message: partial.message || "",
+        done: partial.done != null ? partial.done : done,
+        total: partial.total != null ? partial.total : total,
+        currentTitle: partial.currentTitle || "",
+        currentVideoId: partial.currentVideoId || "",
+        removed,
+        maybeMoved,
+        yesMoved,
+        failed: failed.slice(),
+      };
+      try {
+        onProgress(payload);
+      } catch {
+        /* ignore UI errors */
+      }
+    }
 
     const nosNeedAction = nos.length > 0;
     const maybesNeedAction = maybes.length > 0;
@@ -215,19 +249,27 @@
       };
     }
 
-    const failed = [];
-    let removed = 0;
-    let maybeAdded = 0;
-    let maybeMoved = 0;
-    let yesMoved = 0;
     const stashIdsToDrop = [];
     const noMode = cfg.noMode === "playlist" ? "playlist" : "remove";
+
+    emit({
+      phase: "start",
+      message: `Applying ${total}…`,
+      done: 0,
+      total,
+    });
 
     if (nos.length) {
       if (noMode === "playlist" && (cfg.noPlaylistId || cfg.noPlaylistName)) {
         const dest = cfg.noPlaylistName || cfg.noPlaylistId;
-        progress(`Moving ${nos.length} no → "${dest}" then off WL…`);
         for (const it of nos) {
+          emit({
+            phase: "no",
+            message: `${done} / ${total} · moving no · ${itemLabel(it)}`,
+            done,
+            currentTitle: itemLabel(it),
+            currentVideoId: it.videoId || "",
+          });
           const res = await addThenRemove(tab.id, it.videoId, cfg.noPlaylistId, cfg.noPlaylistName);
           if (!res.ok) {
             const hint = res.needsApi ? " (create playlist first / DOM save menu)" : "";
@@ -236,16 +278,38 @@
             removed += 1;
             if (it.id) stashIdsToDrop.push(it.id);
           }
+          done += 1;
+          emit({
+            phase: "no",
+            message: `${done} / ${total} · moving no · ${itemLabel(it)}`,
+            done,
+            currentTitle: itemLabel(it),
+            currentVideoId: it.videoId || "",
+          });
           await sleep(550);
         }
       } else {
-        progress(`Removing ${nos.length} no…`);
         for (const it of nos) {
+          emit({
+            phase: "no",
+            message: `${done} / ${total} · removing no · ${itemLabel(it)}`,
+            done,
+            currentTitle: itemLabel(it),
+            currentVideoId: it.videoId || "",
+          });
           const res = await sendAction(tab.id, "STASH_REMOVE_FROM_WL", { videoId: it.videoId });
           if (res?.ok) {
             removed += 1;
             if (it.id) stashIdsToDrop.push(it.id);
           } else failed.push(`no ${it.videoId}: ${res?.error || "fail"}`);
+          done += 1;
+          emit({
+            phase: "no",
+            message: `${done} / ${total} · removing no · ${itemLabel(it)}`,
+            done,
+            currentTitle: itemLabel(it),
+            currentVideoId: it.videoId || "",
+          });
           await sleep(450);
         }
       }
@@ -254,13 +318,27 @@
     const maybeName = cfg.maybePlaylistName || "Maybe Watch Later";
     const maybeId = cfg.maybePlaylistId || "";
     if (maybes.length) {
-      progress(`Moving ${maybes.length} maybe → "${maybeName}" then off WL…`);
       for (const it of maybes) {
+        emit({
+          phase: "maybe",
+          message: `${done} / ${total} · moving maybe · ${itemLabel(it)}`,
+          done,
+          currentTitle: itemLabel(it),
+          currentVideoId: it.videoId || "",
+        });
         const res = await addThenRemove(tab.id, it.videoId, maybeId, maybeName);
         if (!res.ok) {
           const hint = res.needsApi ? " (create playlist first / DOM save menu)" : "";
           failed.push(`maybe-${res.stage} ${it.videoId}: ${res.error || "fail"}${hint}`);
           if (res.added) maybeAdded += 1;
+          done += 1;
+          emit({
+            phase: "maybe",
+            message: `${done} / ${total} · moving maybe · ${itemLabel(it)}`,
+            done,
+            currentTitle: itemLabel(it),
+            currentVideoId: it.videoId || "",
+          });
           await sleep(550);
           continue;
         }
@@ -268,6 +346,14 @@
         maybeMoved += 1;
         removed += 1;
         if (it.id) stashIdsToDrop.push(it.id);
+        done += 1;
+        emit({
+          phase: "maybe",
+          message: `${done} / ${total} · moving maybe · ${itemLabel(it)}`,
+          done,
+          currentTitle: itemLabel(it),
+          currentVideoId: it.videoId || "",
+        });
         await sleep(550);
       }
     }
@@ -275,17 +361,39 @@
     if (yeses.length) {
       const yesName = cfg.yesPlaylistName || "Stash Yes";
       const yesId = cfg.yesPlaylistId || "";
-      progress(`Moving ${yeses.length} yes → "${yesName}"…`);
       for (const it of yeses) {
+        emit({
+          phase: "yes",
+          message: `${done} / ${total} · moving yes · ${itemLabel(it)}`,
+          done,
+          currentTitle: itemLabel(it),
+          currentVideoId: it.videoId || "",
+        });
         const res = await addThenRemove(tab.id, it.videoId, yesId, yesName);
         if (!res.ok) {
           failed.push(`yes-${res.stage} ${it.videoId}: ${res.error || "fail"}`);
+          done += 1;
+          emit({
+            phase: "yes",
+            message: `${done} / ${total} · moving yes · ${itemLabel(it)}`,
+            done,
+            currentTitle: itemLabel(it),
+            currentVideoId: it.videoId || "",
+          });
           await sleep(450);
           continue;
         }
         yesMoved += 1;
         // Yes moved off WL → drop from stash so pie totals match live WL
         if (it.id) stashIdsToDrop.push(it.id);
+        done += 1;
+        emit({
+          phase: "yes",
+          message: `${done} / ${total} · moving yes · ${itemLabel(it)}`,
+          done,
+          currentTitle: itemLabel(it),
+          currentVideoId: it.videoId || "",
+        });
         await sleep(550);
       }
     }
@@ -296,8 +404,26 @@
       await root.StashStorage.setItems(cleaned.items);
     }
 
-    progress("done");
-    return { ok: true, removed, maybeAdded, maybeMoved, yesMoved, failed, stashDropped: stashIdsToDrop.length };
+    const result = {
+      ok: true,
+      removed,
+      maybeAdded,
+      maybeMoved,
+      yesMoved,
+      failed,
+      stashDropped: stashIdsToDrop.length,
+    };
+    const anyOk = removed > 0 || maybeMoved > 0 || yesMoved > 0;
+    const endPhase = failed.length && !anyOk ? "failed" : "done";
+    emit({
+      phase: endPhase,
+      message: endPhase === "failed" ? "Failed" : "Done",
+      done: total,
+      total,
+      currentTitle: "",
+      currentVideoId: "",
+    });
+    return result;
   }
 
   root.StashApply = {

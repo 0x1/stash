@@ -84,6 +84,16 @@
       <span id="scan-progress-label" class="scan-progress-label"></span>
     </div>
 
+    <div id="apply-progress" class="apply-progress" hidden aria-hidden="true">
+      <div id="apply-progress-title" class="apply-progress-title">Applying…</div>
+      <div class="apply-progress-track" aria-hidden="true">
+        <div id="apply-progress-fill" class="apply-progress-fill"></div>
+      </div>
+      <div id="apply-progress-line" class="apply-progress-line"></div>
+      <div id="apply-progress-counts" class="apply-progress-counts"></div>
+      <ul id="apply-progress-errors" class="apply-progress-errors"></ul>
+    </div>
+
     <p id="status" class="status"></p>
 
     <aside id="config-panel" class="config" hidden>
@@ -139,6 +149,7 @@
     <script src="shared/tabs.js"></script>
     <script src="shared/apply.js"></script>
     <script src="shared/scan-progress.js"></script>
+    <script src="shared/apply-progress.js"></script>
     <script src="deck.js"></script>
   </body>
 </html>

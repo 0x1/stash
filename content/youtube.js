@@ -1576,6 +1576,57 @@
     return (el.textContent || "").replace(/\s+/g, " ").trim();
   }
 
+  function pressEscape() {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  }
+
+  /** Score remove-menu labels; higher = more specific. */
+  function removeMenuMatchScore(text) {
+    const t = String(text || "");
+    if (/remove from watch later/i.test(t)) return 3;
+    if (/remove from playlist/i.test(t)) return 2;
+    if (/remove video/i.test(t)) return 1;
+    return 0;
+  }
+
+  function pickRemoveMenuItem(items) {
+    let best = null;
+    let bestScore = 0;
+    for (const el of items) {
+      const score = removeMenuMatchScore(textOf(el));
+      if (score > bestScore) {
+        bestScore = score;
+        best = el;
+      }
+    }
+    return best;
+  }
+
+  function visibleMenuLabels(items, limit = 4) {
+    const labels = [];
+    const seen = new Set();
+    for (const el of items) {
+      const t = textOf(el);
+      if (!t || seen.has(t)) continue;
+      seen.add(t);
+      labels.push(t);
+      if (labels.length >= limit) break;
+    }
+    return labels;
+  }
+
+  async function closeStrayMenus() {
+    const stillOpen = [
+      ...document.querySelectorAll(
+        "ytd-menu-popup-renderer, tp-yt-iron-dropdown:not([aria-hidden='true']), [role='menu']"
+      ),
+    ].some(visible);
+    if (stillOpen) {
+      pressEscape();
+      await sleep(80);
+    }
+  }
+
   async function removeFromWatchLater(videoId) {
     if (!videoId) return { ok: false, error: "missing videoId" };
     const row = await findRowByVideoIdResilient(videoId);
@@ -1587,10 +1638,15 @@
     if (!clickMenuButton(row)) return { ok: false, error: "menu button not found" };
 
     const items = await waitForMenuItems(MENU_TIMEOUT_MS);
-    const target = items.find((el) => /remove from watch later/i.test(textOf(el)));
+    const target = pickRemoveMenuItem(items);
     if (!target) {
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      return { ok: false, error: "Remove from Watch later not in menu (English UI?)" };
+      pressEscape();
+      const labels = visibleMenuLabels(items, 4);
+      const listed = labels.length ? labels.join(" · ") : "(empty menu)";
+      return {
+        ok: false,
+        error: `Remove item not in menu (saw: ${listed})`,
+      };
     }
     const clickable =
       target.closest("ytd-menu-service-item-renderer") ||
@@ -1598,7 +1654,8 @@
       target.closest("tp-yt-paper-item") ||
       target;
     clickable.click();
-    await sleep(200);
+    await sleep(220);
+    await closeStrayMenus();
     return { ok: true };
   }
 
@@ -1663,10 +1720,18 @@
     }
 
     let items = await waitForMenuItems(MENU_TIMEOUT_MS);
-    let saveItem = items.find((el) => /^save$/i.test(textOf(el)) || /save to playlist/i.test(textOf(el)));
+    let saveItem = items.find(
+      (el) => /save to playlist/i.test(textOf(el)) || /^save$/i.test(textOf(el))
+    );
     if (!saveItem) {
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      return { ok: false, needsApi: true, error: "Save / Save to playlist not in ⋮ menu" };
+      pressEscape();
+      const labels = visibleMenuLabels(items, 4);
+      const listed = labels.length ? labels.join(" · ") : "(empty menu)";
+      return {
+        ok: false,
+        needsApi: true,
+        error: `Save / Save to playlist not in ⋮ menu (saw: ${listed})`,
+      };
     }
     const saveClick =
       saveItem.closest("ytd-menu-service-item-renderer") ||
@@ -1725,7 +1790,7 @@
     }
 
     if (!playlistEl) {
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      pressEscape();
       const label = playlistName || playlistId || "?";
       return {
         ok: false,
@@ -1748,7 +1813,7 @@
       await sleep(250);
     }
 
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    pressEscape();
     const closeBtn = document.querySelector(
       "yt-icon-button[aria-label*='Close'], button[aria-label*='Close']"
     );

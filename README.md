@@ -32,16 +32,20 @@ Tinder-like triage for **YouTube Watch Later** (X bookmarks secondary). Built fo
 
 Uncategorized items are left alone on Apply.
 
-## Watch Later sync (0.3.10)
+## Watch Later sync (0.3.11)
 
-Apply status now explains **nothing to apply** (with live no/maybe/yes counts), confirms before changing YouTube, and notes when Yes stays on Watch Later (`yesMode: keep_wl`). Remove/add retries once after scrolling if a WL row is not yet in view.
+Apply status explains **nothing to apply** (with live no/maybe/yes counts), confirms before changing YouTube, and notes when Yes stays on Watch Later (`yesMode: keep_wl`). Remove/add retries once after scrolling if a WL row is not yet in view.
+
+**Remove matching** accepts `Remove from Watch later`, `Remove from playlist`, or `Remove video` (most specific wins). On miss, Escape closes the menu and the error lists visible labels.
+
+**Apply progress** panel (`#apply-progress`) on side panel + deck shows bar, current video, counts, and recent fails — stays visible after Done/Failed until the next Apply.
 
 Scan on Watch Later **prunes** youtube items that left the playlist when the scrape looks complete (≥95% of reported playlist size, or a full `ytInitialData` dump). Apply also drops successfully removed/moved videos from stash so the pie matches live WL. Use **Clear stash** to wipe storage; **Reset triage** only clears marks.
 
 ## Honesty / limits
 
 - **Scrape** uses `ytInitialData` when present, else DOM rows. YouTube A/B markup can miss views, publish date, or channel avatar.
-- **Remove from Watch later** automates the English ⋮ menu. Non-English UI will fail until labels match.
+- **Remove from Watch later / playlist** automates the English ⋮ menu (`Remove from Watch later`, `Remove from playlist`, `Remove video`). Non-English UI will fail until labels match.
 - **Add to playlist** is best-effort: Save menu → match by playlist id or exact name. Playlist discovery walks `ytInitialData` and may fetch `/feed/playlists`. No YouTube Data API key in this build.
 - X/Twitter scrape stays basic.
 
@@ -50,7 +54,7 @@ Scan on Watch Later **prunes** youtube items that left the playlist when the scr
 - `deck.html` — primary triage UI + destination config
 - `sidepanel.html` — launcher + mini cover + Scan / Open deck / Apply
 - `content/youtube.js` — scrape + `STASH_REMOVE_FROM_WL` + `STASH_ADD_TO_PLAYLIST` + `STASH_LIST_PLAYLISTS`
-- `shared/storage.js` / `shared/apply.js` — data model + apply orchestration
+- `shared/storage.js` / `shared/apply.js` / `shared/apply-progress.js` — data model + apply orchestration + progress UI
 
 ## Data (`chrome.storage.local`)
 

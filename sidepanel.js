@@ -325,18 +325,50 @@ async function apply() {
 
   $("btn-apply").disabled = true;
   $("status").textContent = "applying…";
+  const total = work.nos + work.maybes + work.yeses;
+  if (typeof StashApplyProgress !== "undefined") {
+    StashApplyProgress.start({ total });
+  }
   try {
     const result = await StashApply.applyDecisions({
-      onProgress: (m) => {
-        $("status").textContent = m;
+      onProgress: (payload) => {
+        if (typeof StashApplyProgress !== "undefined") {
+          StashApplyProgress.update(payload);
+        } else if (typeof payload === "string") {
+          $("status").textContent = payload;
+        } else if (payload?.message) {
+          $("status").textContent = payload.message;
+        }
       },
     });
     $("status").textContent = StashApply.formatApplyStatus(result);
+    if (typeof StashApplyProgress !== "undefined") {
+      if (result.nothingToApply || result.needWlTab) {
+        StashApplyProgress.hide();
+      } else {
+        StashApplyProgress.finish({
+          ...result,
+          done: total,
+          total,
+        });
+      }
+    }
     if (result.failed?.length) {
       console.warn("Stash apply failures", result.failed);
     }
   } catch (err) {
     $("status").textContent = String(err);
+    if (typeof StashApplyProgress !== "undefined") {
+      StashApplyProgress.finish({
+        ok: false,
+        removed: 0,
+        maybeMoved: 0,
+        yesMoved: 0,
+        failed: [String(err)],
+        done: 0,
+        total,
+      });
+    }
   } finally {
     $("btn-apply").disabled = false;
     await refresh();

@@ -637,14 +637,48 @@ async function apply() {
 
   $("btn-apply").disabled = true;
   setStatus("applying…");
+  const total = work.nos + work.maybes + work.yeses;
+  if (typeof StashApplyProgress !== "undefined") {
+    StashApplyProgress.start({ total });
+  }
   try {
     const result = await StashApply.applyDecisions({
-      onProgress: (m) => setStatus(m),
+      onProgress: (payload) => {
+        if (typeof StashApplyProgress !== "undefined") {
+          StashApplyProgress.update(payload);
+        } else if (typeof payload === "string") {
+          setStatus(payload);
+        } else if (payload?.message) {
+          setStatus(payload.message);
+        }
+      },
     });
     setStatus(StashApply.formatApplyStatus(result));
+    if (typeof StashApplyProgress !== "undefined") {
+      if (result.nothingToApply || result.needWlTab) {
+        StashApplyProgress.hide();
+      } else {
+        StashApplyProgress.finish({
+          ...result,
+          done: total,
+          total,
+        });
+      }
+    }
     if (result.failed?.length) console.warn(result.failed);
   } catch (err) {
     setStatus(String(err));
+    if (typeof StashApplyProgress !== "undefined") {
+      StashApplyProgress.finish({
+        ok: false,
+        removed: 0,
+        maybeMoved: 0,
+        yesMoved: 0,
+        failed: [String(err)],
+        done: 0,
+        total,
+      });
+    }
   } finally {
     $("btn-apply").disabled = false;
   }

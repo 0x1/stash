@@ -611,3 +611,96 @@ kbd {
 .scan-progress-label {
   font-size: 11px;
 }
+
+/* --- Apply progress --- */
+.apply-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 14px 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  background: color-mix(in srgb, var(--panel) 92%, var(--accent) 4%);
+}
+.apply-progress[hidden] {
+  display: none !important;
+}
+.apply-progress-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--fg);
+}
+.apply-progress.is-done .apply-progress-title {
+  color: var(--accent);
+}
+.apply-progress.is-failed .apply-progress-title {
+  color: var(--no);
+}
+.apply-progress-track {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--line) 55%, var(--panel));
+  overflow: hidden;
+}
+.apply-progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.28s ease-out;
+}
+.apply-progress.is-failed .apply-progress-fill {
+  background: var(--no);
+}
+.apply-progress-line {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-height: 1.2em;
+}
+.apply-progress-counts {
+  font-size: 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+.apply-progress-errors {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  max-height: 5.5em;
+  overflow-y: auto;
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--no);
+}
+.apply-progress-errors:empty {
+  display: none;
+}
+.apply-progress-errors li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Fixed near bottom status on deck (above scan strip) */
+.apply-progress {
+  position: fixed;
+  right: 20px;
+  bottom: 88px;
+  left: auto;
+  margin: 0;
+  width: min(340px, 42vw);
+  max-width: 42vw;
+  z-index: 26;
+  pointer-events: none;
+  box-shadow: 0 4px 18px color-mix(in srgb, #000 12%, transparent);
+  background: color-mix(in srgb, var(--bar-bg-strong) 92%, transparent);
+}
