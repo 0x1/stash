@@ -225,6 +225,12 @@ body {
 .pie-wrap.tone-warm .pie-budget-line .yes-bit { color: var(--maybe); }
 .pie-wrap.tone-over .pie-budget-line .yes-bit { color: var(--no); }
 
+.pie-body[hidden],
+.pie-empty[hidden],
+.pie-budget-line[hidden] {
+  display: none !important;
+}
+
 .counts {
   padding: 0 14px 10px;
   font-size: 13px;

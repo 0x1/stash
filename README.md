@@ -32,6 +32,8 @@ Tinder-like triage for **YouTube Watch Later** (X bookmarks secondary). Built fo
 
 Uncategorized items are left alone on Apply.
 
+**0.3.17** — Fix the side-panel pie card after clearing the stash.
+
 **0.3.16** — Clarify button tooltips and triage confirmation dialogs.
 
 ## Watch Later sync (0.3.15)

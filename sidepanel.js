@@ -58,10 +58,28 @@ function renderPie(stashItems, stashConfig) {
   if (!c.total) {
     if (empty) {
       empty.hidden = false;
-      empty.textContent = "scan Watch Later → open deck";
+      empty.textContent = "Scan to start";
     }
     if (body) body.hidden = true;
-    if (budgetLine) budgetLine.hidden = true;
+    if (budgetLine) {
+      budgetLine.hidden = true;
+      budgetLine.innerHTML = "";
+      budgetLine.title = "";
+    }
+    const svg = $("pie-svg");
+    if (svg) svg.innerHTML = "";
+    const legend = $("pie-legend");
+    if (legend) legend.innerHTML = "";
+    const pieTotal = $("pie-total");
+    if (pieTotal) {
+      pieTotal.textContent = "0";
+      pieTotal.removeAttribute("title");
+    }
+    const pieDur = $("pie-duration");
+    if (pieDur) {
+      pieDur.textContent = "—";
+      pieDur.removeAttribute("title");
+    }
     if (wrap) wrap.classList.remove("tone-ok", "tone-warm", "tone-over");
     return;
   }
