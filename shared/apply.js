@@ -57,6 +57,7 @@
       videoId,
       playlistId: playlistId || undefined,
       playlistName: playlistName || undefined,
+      uncheckWatchLater: true,
     });
     if (!add?.ok) {
       // Row already gone from WL — nothing to add/remove; drop the stash mark
@@ -65,14 +66,29 @@
       }
       return { ok: false, stage: "add", error: add?.error, needsApi: add?.needsApi };
     }
+    // Primary path: Save panel unchecked Watch later in the same dialog
+    if (add.uncheckedWatchLater === true) {
+      return { ok: true, alreadyGone: false, added: true, uncheckedWatchLater: true };
+    }
     await sleep(400);
     const rm = await sendAction(tabId, "STASH_REMOVE_FROM_WL", { videoId });
-    // Remove stage: alreadyGone counts as success for dropping the stash mark
+    // After a successful add, row-not-found alreadyGone alone is NOT enough —
+    // the WL list is virtualized and the row may simply be out of view while
+    // the video is still on Watch Later (now also on Maybe/Yes).
+    if (rm?.ok && !rm?.alreadyGone) {
+      return { ok: true, alreadyGone: false, added: true };
+    }
     if (rm?.alreadyGone) {
-      return { ok: true, alreadyGone: true, added: true };
+      return {
+        ok: false,
+        stage: "remove",
+        error: "still on Watch Later? (remove saw alreadyGone after add; Save uncheck missed)",
+        added: true,
+        alreadyGone: true,
+      };
     }
     if (!rm?.ok) return { ok: false, stage: "remove", error: rm?.error, added: true };
-    return { ok: true, alreadyGone: false };
+    return { ok: true, alreadyGone: false, added: true };
   }
 
   function ytMarked(all, status) {
@@ -448,19 +464,14 @@
             currentVideoId: it.videoId || "",
           });
           const res = await addThenRemove(tab.id, it.videoId, cfg.noPlaylistId, cfg.noPlaylistName);
-          if (res.ok || res.alreadyGone) {
+          if (res.ok) {
             if (res.alreadyGone) alreadyGone += 1;
             else removed += 1;
             if (it.id) stashIdsToDrop.push(it.id);
           } else {
             const hint = res.needsApi ? " (create playlist first / DOM save menu)" : "";
             failed.push(`no-${res.stage} ${it.videoId}: ${res.error || "fail"}${hint}`);
-            // add succeeded but remove alreadyGone should not reach here (ok:true);
-            // still drop if remove-stage alreadyGone leaked as fail
-            if (res.stage === "remove" && res.alreadyGone && it.id) {
-              alreadyGone += 1;
-              stashIdsToDrop.push(it.id);
-            }
+            // Do not drop stash on remove alreadyGone-after-add — video may still be on WL
           }
           done += 1;
           emit({
@@ -528,15 +539,11 @@
           currentVideoId: it.videoId || "",
         });
         const res = await addThenRemove(tab.id, it.videoId, maybeId, maybeName);
-        if (!res.ok && !res.alreadyGone) {
+        if (!res.ok) {
           const hint = res.needsApi ? " (create playlist first / DOM save menu)" : "";
           failed.push(`maybe-${res.stage} ${it.videoId}: ${res.error || "fail"}${hint}`);
           if (res.added) maybeAdded += 1;
-          // add ok + remove alreadyGone should be ok:true; belt-and-suspenders drop
-          if (res.stage === "remove" && res.alreadyGone && it.id) {
-            alreadyGone += 1;
-            stashIdsToDrop.push(it.id);
-          }
+          // Keep stash mark so user can retry — alreadyGone-after-add is not proof off WL
           done += 1;
           emit({
             phase: "maybe",
@@ -586,12 +593,9 @@
           currentVideoId: it.videoId || "",
         });
         const res = await addThenRemove(tab.id, it.videoId, yesId, yesName);
-        if (!res.ok && !res.alreadyGone) {
+        if (!res.ok) {
           failed.push(`yes-${res.stage} ${it.videoId}: ${res.error || "fail"}`);
-          if (res.stage === "remove" && res.alreadyGone && it.id) {
-            alreadyGone += 1;
-            stashIdsToDrop.push(it.id);
-          }
+          // Keep stash mark so user can retry — alreadyGone-after-add is not proof off WL
           done += 1;
           emit({
             phase: "yes",

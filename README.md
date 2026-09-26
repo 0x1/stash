@@ -15,7 +15,7 @@ Tinder-like triage for **YouTube Watch Later** (X bookmarks secondary). Built fo
 4. Side panel shows cover thumb + counts → **Start triage**.
 5. On the deck: hammer keys
    - **← / n / j** → no (default: remove from WL on Apply)
-   - **→ / y / k** → maybe (add to Maybe playlist, then remove from WL)
+   - **→ / y / k** → maybe (add to Maybe playlist + uncheck Watch later)
    - **↑ / Space** → yes (default: keep in WL)
    - **Esc / Backspace** → undo
 6. Optional: ⚙ config — set No / Maybe / Yes destinations (Refresh playlists with a YT tab open).
@@ -26,11 +26,13 @@ Tinder-like triage for **YouTube Watch Later** (X bookmarks secondary). Built fo
 | keys | meaning |
 |------|---------|
 | `←` `n` `j` | **no** — remove from WL (or move to a playlist) on apply |
-| `→` `y` `k` | **maybe** — add to Maybe playlist, then remove from WL |
+| `→` `y` `k` | **maybe** — add to Maybe playlist + uncheck Watch later |
 | `↑` `Space` | **yes** — keep in WL (or move to Yes playlist) |
 | `Esc` `Backspace` | undo last decision |
 
 Uncategorized items are left alone on Apply.
+
+**0.3.21** — Move off Watch Later in the same Save panel: after checking Maybe/Yes (or No→playlist), uncheck **Watch later** when it was checked. Skips the flaky separate ⋮ Remove when uncheck succeeds. After a successful add, row-not-found `alreadyGone` alone no longer counts as remove success (avoids videos stuck on both Maybe and WL).
 
 **0.3.20** — Maybe Save-to-playlist: search/scroll the virtualized picker, case-insensitive name match, resolve playlist id from cache before Apply, clearer miss errors (visible names + scroll/search hint). Soft cache-miss preflight; config hint when default Maybe isn’t cached. Side panel **Start triage** (was Open full deck).
 

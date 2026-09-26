@@ -2480,7 +2480,152 @@
     return best;
   }
 
-  async function addToPlaylist(videoId, playlistName, playlistId) {
+  function playlistOptionCheckbox(el) {
+    if (!el) return null;
+    return (
+      el.querySelector("tp-yt-paper-checkbox") ||
+      el.querySelector("[role='checkbox']") ||
+      el.querySelector("[aria-checked]") ||
+      (el.getAttribute("aria-checked") != null ? el : null) ||
+      (el.getAttribute("aria-pressed") != null ? el : null)
+    );
+  }
+
+  function playlistOptionChecked(el) {
+    if (!el) return false;
+    const checkbox = playlistOptionCheckbox(el);
+    if (
+      checkbox?.getAttribute("aria-checked") === "true" ||
+      checkbox?.getAttribute("aria-pressed") === "true" ||
+      checkbox?.checked === true ||
+      el.getAttribute("aria-checked") === "true" ||
+      el.getAttribute("aria-pressed") === "true"
+    ) {
+      return true;
+    }
+    // Filled bookmark / selected state in newer Save pickers
+    if (
+      el.querySelector?.(
+        "yt-icon[icon*='bookmark-fill'], yt-icon[icon*='bookmark_fill'], " +
+          "[class*='bookmark-filled'], [class*='BookmarkFilled'], " +
+          "path[d*='M17 3']"
+      )
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  function isWatchLaterPlaylistCandidate(el) {
+    if (!el) return false;
+    const id = playlistIdFromEl(el);
+    if (id === "WL") return true;
+    const lab = normalizePlaylistName(candidatePlaylistLabel(el));
+    if (lab === "watch later") return true;
+    // Whole-row text sometimes prefixes icons / counts — exact after normalize only
+    const whole = normalizePlaylistName(textOf(el));
+    return whole === "watch later";
+  }
+
+  function findWatchLaterInCandidates(candidates) {
+    return (candidates || []).find(isWatchLaterPlaylistCandidate) || null;
+  }
+
+  /**
+   * After target playlist is checked: clear Save search (if any), find Watch Later,
+   * uncheck if checked. Returns whether WL ended unchecked.
+   */
+  async function uncheckWatchLaterInSavePanel() {
+    let pickerRoots = getPickerRoots();
+    const searchInput = findPlaylistSearchInput(pickerRoots);
+    if (searchInput && String(searchInput.value || "").trim()) {
+      setNativeInputValue(searchInput, "");
+      await sleep(300);
+    }
+
+    async function locateWl() {
+      pickerRoots = getPickerRoots();
+      let candidates = collectPickerCandidates(pickerRoots);
+      let wl = findWatchLaterInCandidates(candidates);
+      if (wl) return wl;
+
+      // Scroll picker — WL is often near the top but virtualization / prior search can hide it
+      const scroller = findScrollableInPicker(pickerRoots);
+      if (scroller) {
+        scroller.scrollTop = 0;
+        await sleep(150);
+        pickerRoots = getPickerRoots();
+        candidates = collectPickerCandidates(pickerRoots);
+        wl = findWatchLaterInCandidates(candidates);
+        if (wl) return wl;
+        const maxSteps = 12;
+        let lastTop = -1;
+        for (let step = 0; step < maxSteps; step++) {
+          pickerRoots = getPickerRoots();
+          candidates = collectPickerCandidates(pickerRoots);
+          wl = findWatchLaterInCandidates(candidates);
+          if (wl) return wl;
+          const before = scroller.scrollTop;
+          scroller.scrollTop = Math.min(
+            scroller.scrollTop + Math.max(100, Math.floor(scroller.clientHeight * 0.8)),
+            scroller.scrollHeight
+          );
+          await sleep(150);
+          if (scroller.scrollTop === before || scroller.scrollTop === lastTop) break;
+          lastTop = scroller.scrollTop;
+        }
+      }
+      // Label fallback
+      const labels = [...document.querySelectorAll("#label, yt-formatted-string, span, a")].filter(
+        visible
+      );
+      const lab = labels.find((el) => {
+        const id =
+          playlistIdFromEl(el) ||
+          playlistIdFromEl(el.closest("a, div, ytd-playlist-add-to-option-renderer"));
+        if (id === "WL") return true;
+        return normalizePlaylistName(textOf(el)) === "watch later";
+      });
+      if (lab) {
+        return (
+          lab.closest("ytd-playlist-add-to-option-renderer") ||
+          lab.closest("[role='option']") ||
+          lab.closest("tp-yt-paper-checkbox") ||
+          lab.closest("yt-list-item-view-model") ||
+          lab.closest("[role='checkbox']") ||
+          lab
+        );
+      }
+      return null;
+    }
+
+    let wlEl = await locateWl();
+    if (!wlEl) return { uncheckedWatchLater: false, reason: "wl-row-not-found" };
+
+    if (!playlistOptionChecked(wlEl)) {
+      return { uncheckedWatchLater: true, reason: "already-unchecked" };
+    }
+
+    const clickTarget = playlistOptionCheckbox(wlEl) || wlEl;
+    clickTarget.click();
+    await sleep(280);
+
+    if (!playlistOptionChecked(wlEl)) {
+      return { uncheckedWatchLater: true, reason: "unchecked" };
+    }
+
+    // Retry once
+    (playlistOptionCheckbox(wlEl) || wlEl).click();
+    await sleep(280);
+    wlEl = (await locateWl()) || wlEl;
+    if (!playlistOptionChecked(wlEl)) {
+      return { uncheckedWatchLater: true, reason: "unchecked-retry" };
+    }
+    return { uncheckedWatchLater: false, reason: "still-checked" };
+  }
+
+  async function addToPlaylist(videoId, playlistName, playlistId, opts = {}) {
+    const uncheckWatchLater = !!(opts && opts.uncheckWatchLater);
     if (!videoId) return { ok: false, needsApi: true, error: "missing videoId" };
     if (!playlistName && !playlistId) {
       return { ok: false, needsApi: true, error: "missing playlistName/playlistId" };
@@ -2651,18 +2796,18 @@
       };
     }
 
-    const checkbox =
-      playlistEl.querySelector("tp-yt-paper-checkbox") ||
-      playlistEl.querySelector("[aria-checked]") ||
-      (playlistEl.getAttribute("aria-checked") != null ? playlistEl : null);
-    const checked =
-      checkbox?.getAttribute("aria-checked") === "true" ||
-      checkbox?.checked === true ||
-      playlistEl.getAttribute("aria-checked") === "true";
+    const checkbox = playlistOptionCheckbox(playlistEl);
+    const checked = playlistOptionChecked(playlistEl);
 
     if (!checked) {
       (checkbox || playlistEl).click();
       await sleep(250);
+    }
+
+    let uncheckedWatchLater = false;
+    if (uncheckWatchLater) {
+      const wlRes = await uncheckWatchLaterInSavePanel();
+      uncheckedWatchLater = !!wlRes?.uncheckedWatchLater;
     }
 
     pressEscape();
@@ -2671,7 +2816,11 @@
     );
     if (closeBtn && visible(closeBtn)) closeBtn.click();
 
-    return { ok: true, matchedId: playlistIdFromEl(playlistEl) || playlistId || null };
+    return {
+      ok: true,
+      matchedId: playlistIdFromEl(playlistEl) || playlistId || null,
+      uncheckedWatchLater,
+    };
   }
 
   const SYSTEM_PLAYLIST_IDS = new Set(["WL", "LL", "DL"]);
@@ -2890,7 +3039,9 @@
       return true;
     }
     if (msg?.type === "STASH_ADD_TO_PLAYLIST") {
-      addToPlaylist(msg.videoId, msg.playlistName, msg.playlistId)
+      addToPlaylist(msg.videoId, msg.playlistName, msg.playlistId, {
+        uncheckWatchLater: !!msg.uncheckWatchLater,
+      })
         .then(sendResponse)
         .catch((err) => sendResponse({ ok: false, needsApi: true, error: String(err) }));
       return true;
