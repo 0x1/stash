@@ -1488,6 +1488,63 @@
     return null;
   }
 
+  function findLinkForVideoId(videoId) {
+    const links = document.querySelectorAll(`a[href*="v=${videoId}"]`);
+    for (const a of links) {
+      const href = a.href || a.getAttribute("href") || "";
+      if (href.includes(`v=${videoId}`) || videoIdFromHref(href) === videoId) return a;
+    }
+    return null;
+  }
+
+  function rowFromLink(link) {
+    if (!link) return null;
+    return (
+      link.closest(
+        "ytd-playlist-video-renderer, yt-lockup-view-model, ytd-playlist-panel-video-renderer, ytd-rich-item-renderer"
+      ) || null
+    );
+  }
+
+  async function scrollPlaylistTowardVideo(videoId) {
+    const link = findLinkForVideoId(videoId);
+    if (link) {
+      link.scrollIntoView({ block: "center", inline: "nearest" });
+      await sleep(220);
+      return;
+    }
+    const list =
+      document.querySelector("ytd-playlist-video-list-renderer #contents") ||
+      document.querySelector("#contents.ytd-playlist-video-list-renderer") ||
+      document.querySelector("ytd-playlist-video-list-renderer") ||
+      null;
+    const delta = Math.max(420, Math.floor(window.innerHeight * 0.85));
+    if (list && typeof list.scrollTop === "number") {
+      list.scrollTop = (list.scrollTop || 0) + delta;
+    }
+    window.scrollBy(0, delta);
+    await sleep(350);
+  }
+
+  /** Find playlist row; scroll / search link and retry a couple times if virtualized out of view. */
+  async function findRowByVideoIdResilient(videoId, attempts = 3) {
+    let row = findRowByVideoId(videoId);
+    if (row) return row;
+    for (let i = 0; i < attempts; i++) {
+      await scrollPlaylistTowardVideo(videoId);
+      row = findRowByVideoId(videoId);
+      if (row) return row;
+      const link = findLinkForVideoId(videoId);
+      const fromLink = rowFromLink(link);
+      if (fromLink) {
+        fromLink.scrollIntoView({ block: "center", inline: "nearest" });
+        await sleep(180);
+        return fromLink;
+      }
+    }
+    return null;
+  }
+
   function clickMenuButton(row) {
     const btn =
       row.querySelector("button#button[aria-label*='Action']") ||
@@ -1521,7 +1578,7 @@
 
   async function removeFromWatchLater(videoId) {
     if (!videoId) return { ok: false, error: "missing videoId" };
-    const row = findRowByVideoId(videoId);
+    const row = await findRowByVideoIdResilient(videoId);
     if (!row) {
       return { ok: false, error: `row not found for ${videoId} — scroll WL into view` };
     }
@@ -1595,7 +1652,7 @@
       return { ok: false, needsApi: true, error: "missing playlistName/playlistId" };
     }
 
-    const row = findRowByVideoId(videoId);
+    const row = await findRowByVideoIdResilient(videoId);
     if (!row) {
       return { ok: false, needsApi: true, error: `row not found for ${videoId}` };
     }

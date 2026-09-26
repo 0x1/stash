@@ -148,6 +148,17 @@ button.ghost {
   background: var(--panel);
 }
 button.ghost:hover { color: var(--text); }
+
+button.btn-config {
+  font-size: 22px;
+  line-height: 1;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 8px 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 button:hover { filter: brightness(1.1); }
 button:disabled { opacity: 0.5; cursor: default; }
 

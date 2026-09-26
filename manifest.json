@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Stash",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "description": "Tinder-like triage for YouTube Watch Later. #punksoftware",
   "permissions": [
     "storage",

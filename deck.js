@@ -623,20 +623,25 @@ async function scan() {
 }
 
 async function apply() {
+  const { stashItems, stashConfig } = await StashStorage.getAll();
+  const work = StashApply.countApplyWork(stashItems, stashConfig);
+  if (work.hasWork) {
+    const ok = confirm(
+      `Apply ${work.nos} no + ${work.maybes} maybe + ${work.yeses} yes to YouTube?`
+    );
+    if (!ok) {
+      setStatus("apply cancelled");
+      return;
+    }
+  }
+
   $("btn-apply").disabled = true;
   setStatus("applying…");
   try {
     const result = await StashApply.applyDecisions({
       onProgress: (m) => setStatus(m),
     });
-    if (result.needWlTab) {
-      setStatus(result.error);
-      return;
-    }
-    const failBit = result.failed?.length ? ` · fails: ${result.failed.slice(0, 3).join("; ")}` : "";
-    setStatus(
-      `removed ${result.removed}, maybe moved ${result.maybeMoved}, yes moved ${result.yesMoved}${failBit}`
-    );
+    setStatus(StashApply.formatApplyStatus(result));
     if (result.failed?.length) console.warn(result.failed);
   } catch (err) {
     setStatus(String(err));

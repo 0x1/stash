@@ -311,6 +311,18 @@ function openDeck() {
 }
 
 async function apply() {
+  const { stashItems, stashConfig } = await StashStorage.getAll();
+  const work = StashApply.countApplyWork(stashItems, stashConfig);
+  if (work.hasWork) {
+    const ok = confirm(
+      `Apply ${work.nos} no + ${work.maybes} maybe + ${work.yeses} yes to YouTube?`
+    );
+    if (!ok) {
+      $("status").textContent = "apply cancelled";
+      return;
+    }
+  }
+
   $("btn-apply").disabled = true;
   $("status").textContent = "applying…";
   try {
@@ -319,14 +331,7 @@ async function apply() {
         $("status").textContent = m;
       },
     });
-    if (result.needWlTab) {
-      $("status").textContent = result.error;
-      return;
-    }
-    const failBit = result.failed?.length ? ` · ${result.failed.length} failed` : "";
-    $("status").textContent =
-      `removed ${result.removed} · maybe moved ${result.maybeMoved} · yes moved ${result.yesMoved}${failBit}` +
-      (result.error && !result.ok ? ` · ${result.error}` : "");
+    $("status").textContent = StashApply.formatApplyStatus(result);
     if (result.failed?.length) {
       console.warn("Stash apply failures", result.failed);
     }

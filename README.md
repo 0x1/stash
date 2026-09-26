@@ -32,7 +32,9 @@ Tinder-like triage for **YouTube Watch Later** (X bookmarks secondary). Built fo
 
 Uncategorized items are left alone on Apply.
 
-## Watch Later sync (0.3.9)
+## Watch Later sync (0.3.10)
+
+Apply status now explains **nothing to apply** (with live no/maybe/yes counts), confirms before changing YouTube, and notes when Yes stays on Watch Later (`yesMode: keep_wl`). Remove/add retries once after scrolling if a WL row is not yet in view.
 
 Scan on Watch Later **prunes** youtube items that left the playlist when the scrape looks complete (≥95% of reported playlist size, or a full `ytInitialData` dump). Apply also drops successfully removed/moved videos from stash so the pie matches live WL. Use **Clear stash** to wipe storage; **Reset triage** only clears marks.
 

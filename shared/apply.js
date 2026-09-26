@@ -65,27 +65,101 @@
     return { ok: true };
   }
 
+  function ytMarked(all, status) {
+    return all.filter((i) => i.status === status && i.source === "youtube" && i.videoId);
+  }
+
+  function resolveYesMode(cfg) {
+    return cfg.yesMode === "playlist" || cfg.yesMode === "move_playlist" ? "playlist" : "keep_wl";
+  }
+
+  /**
+   * Count marked items vs items that Apply will actually act on.
+   * @returns {{ nos:number, maybes:number, yeses:number, markedNo:number, markedMaybe:number, markedYes:number, yesMode:string, hasWork:boolean }}
+   */
+  function countApplyWork(stashItems, stashConfig) {
+    const cfg = stashConfig || {};
+    const all = Object.values(stashItems || {});
+    const markedNo = ytMarked(all, "no");
+    const markedMaybe = ytMarked(all, "maybe");
+    const markedYes = ytMarked(all, "yes");
+    const yesMode = resolveYesMode(cfg);
+    const nos = cfg.applyRemovesNo !== false ? markedNo : [];
+    const maybes = cfg.applyAddsMaybe !== false ? markedMaybe : [];
+    const yeses =
+      cfg.applyHandlesYes !== false && yesMode === "playlist" ? markedYes : [];
+    return {
+      nos: nos.length,
+      maybes: maybes.length,
+      yeses: yeses.length,
+      markedNo: markedNo.length,
+      markedMaybe: markedMaybe.length,
+      markedYes: markedYes.length,
+      yesMode,
+      hasWork: nos.length + maybes.length + yeses.length > 0,
+    };
+  }
+
+  /** Human-readable status line for Apply result (deck + sidepanel). */
+  function formatApplyStatus(result) {
+    if (!result) return "apply failed";
+
+    if (result.needWlTab) {
+      return result.error || "Open youtube.com/playlist?list=WL in a tab, then Apply again";
+    }
+
+    if (result.nothingToApply) {
+      const n = result.markedNo ?? 0;
+      const m = result.markedMaybe ?? 0;
+      const y = result.markedYes ?? 0;
+      const counts = `${n} no · ${m} maybe · ${y} yes in stash`;
+      if (n === 0 && m === 0 && y > 0 && result.yesMode === "keep_wl") {
+        return `nothing to apply — yes stays on Watch Later (set Yes destination in ⚙ config to move) (${counts})`;
+      }
+      return `nothing to apply — mark some videos no / maybe / yes first (${counts})`;
+    }
+
+    if (!result.ok && result.error) {
+      return result.error;
+    }
+
+    const removed = result.removed ?? 0;
+    const maybeMoved = result.maybeMoved ?? 0;
+    const yesMoved = result.yesMoved ?? 0;
+    let msg = `removed ${removed} · maybe moved ${maybeMoved} · yes moved ${yesMoved}`;
+
+    if (removed === 0 && maybeMoved === 0 && yesMoved === 0 && !result.error) {
+      msg += " · nothing changed";
+    }
+
+    if (result.failed?.length) {
+      msg += ` · fails: ${result.failed.slice(0, 3).join("; ")}`;
+    }
+
+    if (result.error) {
+      msg += ` · ${result.error}`;
+    }
+
+    return msg;
+  }
+
   /**
    * @param {{ onProgress?: (msg: string) => void }} opts
-   * @returns {Promise<{ok:boolean, removed:number, maybeAdded:number, maybeMoved:number, yesMoved:number, failed:string[], needWlTab?:boolean, error?:string}>}
+   * @returns {Promise<{ok:boolean, removed:number, maybeAdded:number, maybeMoved:number, yesMoved:number, failed:string[], needWlTab?:boolean, nothingToApply?:boolean, markedNo?:number, markedMaybe?:number, markedYes?:number, yesMode?:string, error?:string}>}
    */
   async function applyDecisions(opts = {}) {
     const progress = opts.onProgress || (() => {});
     const { stashItems, stashConfig } = await root.StashStorage.getAll();
     const cfg = stashConfig;
     const all = Object.values(stashItems);
+    const work = countApplyWork(stashItems, cfg);
 
-    const nos = cfg.applyRemovesNo ? all.filter((i) => i.status === "no" && i.source === "youtube" && i.videoId) : [];
-    const maybes = cfg.applyAddsMaybe
-      ? all.filter((i) => i.status === "maybe" && i.source === "youtube" && i.videoId)
-      : [];
-    const yesMode = cfg.yesMode === "playlist" || cfg.yesMode === "move_playlist" ? "playlist" : "keep_wl";
+    const nos = cfg.applyRemovesNo ? ytMarked(all, "no") : [];
+    const maybes = cfg.applyAddsMaybe ? ytMarked(all, "maybe") : [];
+    const yesMode = work.yesMode;
     const yeses =
-      cfg.applyHandlesYes && yesMode === "playlist"
-        ? all.filter((i) => i.status === "yes" && i.source === "youtube" && i.videoId)
-        : [];
+      cfg.applyHandlesYes && yesMode === "playlist" ? ytMarked(all, "yes") : [];
 
-    const noMode = cfg.noMode === "playlist" ? "playlist" : "remove";
     const nosNeedAction = nos.length > 0;
     const maybesNeedAction = maybes.length > 0;
     const yesesNeedAction = yeses.length > 0;
@@ -98,6 +172,11 @@
         maybeMoved: 0,
         yesMoved: 0,
         failed: [],
+        nothingToApply: true,
+        markedNo: work.markedNo,
+        markedMaybe: work.markedMaybe,
+        markedYes: work.markedYes,
+        yesMode,
         error: "nothing to apply",
       };
     }
@@ -142,6 +221,7 @@
     let maybeMoved = 0;
     let yesMoved = 0;
     const stashIdsToDrop = [];
+    const noMode = cfg.noMode === "playlist" ? "playlist" : "remove";
 
     if (nos.length) {
       if (noMode === "playlist" && (cfg.noPlaylistId || cfg.noPlaylistName)) {
@@ -220,5 +300,11 @@
     return { ok: true, removed, maybeAdded, maybeMoved, yesMoved, failed, stashDropped: stashIdsToDrop.length };
   }
 
-  root.StashApply = { applyDecisions, findYoutubeWlTab, findYoutubeTab };
+  root.StashApply = {
+    applyDecisions,
+    findYoutubeWlTab,
+    findYoutubeTab,
+    countApplyWork,
+    formatApplyStatus,
+  };
 })(typeof globalThis !== "undefined" ? globalThis : window);
