@@ -1184,18 +1184,35 @@
     }
   }
 
-  async function enrichMissingMeta(items, { cap = 100, concurrency = 4, onProgress = null } = {}) {
+  async function enrichMissingMeta(items, { cap = 5000, concurrency = 6, onProgress = null } = {}) {
     if (!Array.isArray(items) || !items.length) {
-      return { viewsEnriched: 0, channelsEnriched: 0, datesEnriched: 0, titlesEnriched: 0 };
+      return {
+        viewsEnriched: 0,
+        channelsEnriched: 0,
+        datesEnriched: 0,
+        titlesEnriched: 0,
+        needTotal: 0,
+        queued: 0,
+      };
     }
     const need = items.filter(needsMetaEnrich);
     if (!need.length) {
-      return { viewsEnriched: 0, channelsEnriched: 0, datesEnriched: 0, titlesEnriched: 0 };
+      return {
+        viewsEnriched: 0,
+        channelsEnriched: 0,
+        datesEnriched: 0,
+        titlesEnriched: 0,
+        needTotal: 0,
+        queued: 0,
+      };
     }
     const apiKey = getInnertubeApiKey();
     const clientVersion = getInnertubeClientVersion();
     const visitorData = getYtcfgVisitorData();
-    const queue = need.slice(0, cap);
+    const softCap = Math.max(0, Math.min(Number(cap) || 5000, 5000));
+    // Prefer processing the full need list when under the soft cap (large WL triage).
+    const queue = need.length <= softCap ? need.slice() : need.slice(0, softCap);
+    const needTotal = need.length;
     let viewsEnriched = 0;
     let channelsEnriched = 0;
     let datesEnriched = 0;
@@ -1206,7 +1223,9 @@
     function tickProgress() {
       if (typeof onProgress !== "function") return;
       try {
-        onProgress(completed, queue.length);
+        // Denominator = videos being enriched this scan (queue), with needTotal for honesty
+        // when a soft-cap truncates (label can say "of N").
+        onProgress(completed, queue.length, needTotal);
       } catch {
         /* ignore UI errors */
       }
@@ -1265,7 +1284,14 @@
 
     const n = Math.max(1, Math.min(concurrency, queue.length));
     await Promise.all(Array.from({ length: n }, () => worker()));
-    return { viewsEnriched, channelsEnriched, datesEnriched, titlesEnriched };
+    return {
+      viewsEnriched,
+      channelsEnriched,
+      datesEnriched,
+      titlesEnriched,
+      needTotal,
+      queued: queue.length,
+    };
   }
 
 
@@ -1410,21 +1436,59 @@
     }
   }
 
+  /** Stronger nudge when scroll stalls: window + container + large scrollBy. */
+  function scrollPlaylistAlternate() {
+    const el = findPlaylistScrollParent();
+    try {
+      window.scrollBy(0, Math.max(window.innerHeight || 800, 1200));
+    } catch {
+      /* ignore */
+    }
+    try {
+      window.scrollTo(0, document.documentElement.scrollHeight || document.body.scrollHeight || 0);
+    } catch {
+      /* ignore */
+    }
+    try {
+      if (el && el !== document.scrollingElement && el !== document.documentElement && el !== document.body) {
+        el.scrollTop = el.scrollHeight;
+        try {
+          el.scrollBy(0, Math.max(el.clientHeight || 600, 1000));
+        } catch {
+          /* ignore */
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    try {
+      document.documentElement.scrollTop = document.documentElement.scrollHeight;
+      if (document.body) document.body.scrollTop = document.body.scrollHeight;
+    } catch {
+      /* ignore */
+    }
+  }
+
   /**
    * Auto-scroll a playlist / Watch Later page until rows are loaded (or stall / cap).
    * @returns {{ loadedFully: boolean, playlistVideoCount: number|null, scrollPasses: number, loadedCount: number }}
    */
   async function ensurePlaylistFullyLoaded() {
     const target = parsePlaylistVideoCount();
-    let ids = countLoadedPlaylistVideoIds();
-    let loaded = ids.size;
+    // Persist unique ids across the loop — never reset; union each pass.
+    const accumulated = new Set();
+    for (const id of countLoadedPlaylistVideoIds()) accumulated.add(id);
+    let loaded = accumulated.size;
     let scrollPasses = 0;
     let stagnant = 0;
-    const MAX_SCROLLS = 80;
-    const STAGNANT_LIMIT = 4;
+    const targetOrDefault = target || 2000;
+    // Scale with header count so ~5k WL lists can finish (~15 rows/scroll estimate).
+    const MAX_SCROLLS = Math.min(600, Math.max(120, Math.ceil(targetOrDefault / 15)));
+    const STAGNANT_LIMIT = 10;
     const RATIO = 0.98;
     const started = Date.now();
-    const MAX_MS = 45000;
+    // Enough wall time for ~5k: ~40ms/video soft floor, min 90s, max 15 min.
+    const MAX_MS = Math.min(15 * 60 * 1000, Math.max(90_000, targetOrDefault * 40));
 
     const isPlaylistPage =
       /[?&]list=/i.test(location.href) ||
@@ -1461,11 +1525,19 @@
 
     while (scrollPasses < MAX_SCROLLS && Date.now() - started < MAX_MS) {
       const prev = loaded;
-      scrollPlaylistToBottom();
+      if (stagnant > 0 && stagnant % 2 === 1) {
+        scrollPlaylistAlternate();
+      } else {
+        scrollPlaylistToBottom();
+      }
       scrollPasses += 1;
-      await sleep(350 + Math.floor(Math.random() * 200)); // ~350–550ms
-      ids = countLoadedPlaylistVideoIds();
-      loaded = ids.size;
+      const waitMs =
+        stagnant > 0
+          ? 800 + Math.floor(Math.random() * 400) // 800–1200ms after a stall nudge
+          : 350 + Math.floor(Math.random() * 200); // ~350–550ms
+      await sleep(waitMs);
+      for (const id of countLoadedPlaylistVideoIds()) accumulated.add(id);
+      loaded = accumulated.size;
 
       emitScanProgress({
         phase: "loading",
@@ -1572,29 +1644,42 @@
 
     items = filterJunkItems(items, { afterEnrich: false });
 
+    emitScanProgress({
+      phase: "page",
+      done: items.length,
+      total: items.length,
+      label: `scraping… ${items.length} videos`,
+    });
+
     let viewsEnriched = 0;
     let channelsEnriched = 0;
     let datesEnriched = 0;
     let titlesEnriched = 0;
+    let metaQueued = 0;
+    let metaNeedTotal = 0;
     try {
-      const needCount = Math.min(100, items.filter(needsMetaEnrich).length);
-      if (needCount > 0) {
+      const needEstimate = items.filter(needsMetaEnrich).length;
+      const enrichCap = Math.min(needEstimate, 5000);
+      if (needEstimate > 0) {
         emitScanProgress({
           phase: "meta",
           done: 0,
-          total: needCount,
-          label: `scanning… 0 / ${needCount}`,
+          total: enrichCap,
+          label: `scanning meta… 0 / ${enrichCap}`,
         });
       }
       const er = await enrichMissingMeta(items, {
-        cap: 100,
-        concurrency: 4,
-        onProgress: (done, total) => {
+        cap: enrichCap || 5000,
+        concurrency: 8,
+        onProgress: (done, total, needTotal) => {
+          const denom = total;
+          const ofBit =
+            needTotal != null && needTotal > total ? ` (of ${needTotal})` : "";
           emitScanProgress({
             phase: "meta",
             done,
-            total,
-            label: `scanning… ${done} / ${total}`,
+            total: denom,
+            label: `scanning meta… ${done} / ${denom}${ofBit}`,
           });
         },
       });
@@ -1602,6 +1687,8 @@
       channelsEnriched = er.channelsEnriched || 0;
       datesEnriched = er.datesEnriched || 0;
       titlesEnriched = er.titlesEnriched || 0;
+      metaQueued = er.queued || 0;
+      metaNeedTotal = er.needTotal || 0;
     } catch {
       /* keep scrape result even if enrichment fails */
     }
@@ -1650,6 +1737,8 @@
       channelsEnriched,
       datesEnriched,
       titlesEnriched,
+      metaQueued,
+      metaNeedTotal,
       loadedFully,
       scrollPasses: loadMeta.scrollPasses || 0,
       loadedCount: loadMeta.loadedCount || items.length,

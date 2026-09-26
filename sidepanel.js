@@ -300,7 +300,7 @@ async function scan() {
   }
   let loadBit = "";
   if (res.source === "youtube" && (res.playlistVideoCount != null || res.loadedFully != null)) {
-    const got = res.count ?? 0;
+    const got = res.loadedCount ?? res.count ?? 0;
     const want = res.playlistVideoCount;
     if (res.loadedFully || (want != null && got >= want)) {
       loadBit = want != null ? ` · loaded ${got} / ${want}` : ` · loaded ${got}`;
@@ -309,6 +309,11 @@ async function scan() {
     } else {
       loadBit = ` · loaded ${got}`;
     }
+  }
+  // Honesty: how many videos went through meta enrich this scan.
+  const metaN = res.metaQueued ?? res.metaNeedTotal;
+  if (metaN != null && Number(metaN) > 0) {
+    loadBit += ` · meta ${metaN}`;
   }
   if (typeof StashScanProgress !== "undefined") {
     if (res.isWatchLater) StashScanProgress.setContext("Watch Later");
