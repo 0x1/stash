@@ -1,6 +1,25 @@
 (function () {
   const SOURCE = "youtube";
   const MENU_TIMEOUT_MS = 3000;
+  /** User Pause: stop mid-scan, keep what's loaded. Cleared at each scrape() start. */
+  let scanAbortRequested = false;
+
+  function isScanAbortRequested() {
+    return scanAbortRequested === true;
+  }
+
+  function requestScanAbort() {
+    scanAbortRequested = true;
+  }
+
+  function isPlaylistOrWatchLaterUrl(href = location.href) {
+    const u = String(href || "");
+    return (
+      /[?&]list=/i.test(u) ||
+      /playlist/i.test(u) ||
+      /watch_later/i.test(u)
+    );
+  }
 
   function parseDuration(text) {
     if (!text) return null;
@@ -1178,11 +1197,13 @@
     label = "",
     needTotal = null,
     paused = false,
+    tip = null,
   } = {}) {
     try {
       const msg = { type: "STASH_SCAN_PROGRESS", phase, done, total, label };
       if (needTotal != null) msg.needTotal = needTotal;
       if (paused) msg.paused = true;
+      if (tip) msg.tip = tip;
       chrome.runtime.sendMessage(msg, () => {
         void chrome.runtime.lastError;
       });
@@ -1199,12 +1220,13 @@
     }
   }
 
-  /** Pause until the WL tab is focused again (or maxMs). Does not claim load success. */
+  /** Pause until the WL tab is focused again (or maxMs / user Pause). Does not claim load success. */
   function waitUntilTabVisible({ maxMs = 10 * 60 * 1000 } = {}) {
-    if (isDocumentVisible()) return Promise.resolve({ timedOut: false });
+    if (isDocumentVisible()) return Promise.resolve({ timedOut: false, aborted: false });
+    if (isScanAbortRequested()) return Promise.resolve({ timedOut: false, aborted: true });
     return new Promise((resolve) => {
       let done = false;
-      const finish = (timedOut) => {
+      const finish = (timedOut, aborted = false) => {
         if (done) return;
         done = true;
         try {
@@ -1213,14 +1235,32 @@
           /* ignore */
         }
         clearTimeout(timer);
-        resolve({ timedOut: !!timedOut });
+        clearInterval(poll);
+        resolve({ timedOut: !!timedOut, aborted: !!aborted });
       };
       const onVis = () => {
-        if (isDocumentVisible()) finish(false);
+        if (isScanAbortRequested()) finish(false, true);
+        else if (isDocumentVisible()) finish(false, false);
       };
       document.addEventListener("visibilitychange", onVis);
-      const timer = setTimeout(() => finish(true), Math.max(1000, Number(maxMs) || 0));
+      const timer = setTimeout(() => finish(true, false), Math.max(1000, Number(maxMs) || 0));
+      // Don't hang forever if the user hits Pause while the tab is hidden.
+      const poll = setInterval(() => {
+        if (isScanAbortRequested()) finish(false, true);
+      }, 200);
     });
+  }
+
+  /** Sleep that wakes early on user Pause. */
+  async function sleepAbortable(ms) {
+    const step = 120;
+    let left = Math.max(0, Number(ms) || 0);
+    while (left > 0) {
+      if (isScanAbortRequested()) return;
+      const chunk = Math.min(step, left);
+      await sleep(chunk);
+      left -= chunk;
+    }
   }
 
   async function enrichMissingMeta(items, { cap = 5000, concurrency = 6, onProgress = null } = {}) {
@@ -1272,8 +1312,15 @@
 
     tickProgress();
 
+    let enrichPaused = false;
+
     async function worker() {
       while (idx < queue.length) {
+        if (isScanAbortRequested()) {
+          enrichPaused = true;
+          idx = queue.length;
+          break;
+        }
         if (!isDocumentVisible()) {
           try {
             onProgress?.(completed, queue.length, needTotal);
@@ -1286,14 +1333,27 @@
             total: queue.length,
             needTotal,
             paused: true,
-            label: "paused — focus Watch Later tab",
+            label: isScanAbortRequested()
+              ? "pausing…"
+              : "paused — focus Watch Later to keep filling details",
           });
-          const { timedOut } = await waitUntilTabVisible({ maxMs: 10 * 60 * 1000 });
-          if (timedOut && !isDocumentVisible()) {
-            // Stop queue early; scrape keeps whatever meta we have so far.
+          const { timedOut, aborted } = await waitUntilTabVisible({ maxMs: 10 * 60 * 1000 });
+          if (aborted || isScanAbortRequested()) {
+            enrichPaused = true;
             idx = queue.length;
             break;
           }
+          if (timedOut && !isDocumentVisible()) {
+            // Stop queue early; scrape keeps whatever meta we have so far.
+            enrichPaused = true;
+            idx = queue.length;
+            break;
+          }
+        }
+        if (isScanAbortRequested()) {
+          enrichPaused = true;
+          idx = queue.length;
+          break;
         }
         const i = idx++;
         const it = queue[i];
@@ -1351,6 +1411,7 @@
       titlesEnriched,
       needTotal,
       queued: queue.length,
+      paused: enrichPaused || isScanAbortRequested(),
     };
   }
 
@@ -1592,6 +1653,7 @@
         playlistVideoCount: target,
         scrollPasses: 0,
         loadedCount: loaded,
+        paused: false,
       };
     }
 
@@ -1603,7 +1665,7 @@
         total,
         paused,
         label: paused
-          ? "paused — focus Watch Later tab"
+          ? "paused — focus Watch Later to keep loading"
           : target
             ? `loading playlist… ${loaded} / ${target}`
             : `loading playlist… ${loaded}`,
@@ -1619,17 +1681,33 @@
         playlistVideoCount: target,
         scrollPasses: 0,
         loadedCount: loaded,
+        paused: false,
       };
     }
 
+    let leftPage = false;
     while (scrollPasses < MAX_SCROLLS && Date.now() - started < MAX_MS) {
+      if (isScanAbortRequested()) {
+        pausedOut = true;
+        break;
+      }
+      // Navigated away from playlist / Watch Later mid-load → treat like Pause.
+      if (!isPlaylistOrWatchLaterUrl(location.href)) {
+        leftPage = true;
+        pausedOut = true;
+        break;
+      }
       // Background tabs throttle timers/scroll — pause until WL is focused again.
       if (!isDocumentVisible()) {
         emitLoading(true);
         const pauseStarted = Date.now();
-        const { timedOut } = await waitUntilTabVisible({ maxMs: PAUSE_MAX_MS });
+        const { timedOut, aborted } = await waitUntilTabVisible({ maxMs: PAUSE_MAX_MS });
         // Don't burn scroll wall-clock while the user had another tab focused.
         started += Date.now() - pauseStarted;
+        if (aborted || isScanAbortRequested()) {
+          pausedOut = true;
+          break;
+        }
         if (timedOut && !isDocumentVisible()) {
           // Do NOT claim loadedFully just because we waited out a hidden tab.
           pausedOut = true;
@@ -1650,7 +1728,13 @@
         stagnant > 0
           ? 800 + Math.floor(Math.random() * 400) // 800–1200ms after a stall nudge
           : 350 + Math.floor(Math.random() * 200); // ~350–550ms
-      await sleep(waitMs);
+      await sleepAbortable(waitMs);
+      if (isScanAbortRequested()) {
+        for (const id of countLoadedPlaylistVideoIds()) accumulated.add(id);
+        loaded = accumulated.size;
+        pausedOut = true;
+        break;
+      }
       for (const id of countLoadedPlaylistVideoIds()) accumulated.add(id);
       loaded = accumulated.size;
 
@@ -1662,6 +1746,7 @@
           playlistVideoCount: target,
           scrollPasses,
           loadedCount: loaded,
+          paused: false,
         };
       }
 
@@ -1675,7 +1760,7 @@
 
     // No reported target: stall / cap is best-effort complete.
     // With a target: only claim full when we hit the 98% bar.
-    // Hidden-tab timeout must never flip loadedFully true.
+    // Hidden-tab timeout / user Pause must never flip loadedFully true.
     let loadedFully;
     if (pausedOut) {
       loadedFully = false;
@@ -1690,22 +1775,27 @@
       playlistVideoCount: target,
       scrollPasses,
       loadedCount: loaded,
+      paused: pausedOut || isScanAbortRequested(),
+      leftPage,
     };
   }
 
   async function scrape() {
+    scanAbortRequested = false;
     emitScanProgress({ phase: "page", done: 0, total: 0, label: "scanning…" });
     let loadMeta = {
       loadedFully: true,
       playlistVideoCount: null,
       scrollPasses: 0,
       loadedCount: 0,
+      paused: false,
     };
     try {
       loadMeta = await ensurePlaylistFullyLoaded();
     } catch {
       /* proceed with whatever is loaded */
     }
+    // After Pause during load, still scrape whatever is already on the page.
     emitScanProgress({ phase: "page", done: 0, total: 0, label: "scanning…" });
     let items = scrapeFromYtInitialData();
     const fromData = items.length;
@@ -1768,40 +1858,49 @@
     let titlesEnriched = 0;
     let metaQueued = 0;
     let metaNeedTotal = 0;
+    let metaPaused = false;
+    const loadPaused = loadMeta.paused === true || isScanAbortRequested();
     try {
-      const needEstimate = items.filter(needsMetaEnrich).length;
-      const enrichCap = Math.min(needEstimate, 5000);
-      if (needEstimate > 0) {
-        emitScanProgress({
-          phase: "meta",
-          done: 0,
-          total: enrichCap,
-          needTotal: needEstimate,
-          label: `filling details… 0 / ${enrichCap}`,
-        });
-      }
-      const er = await enrichMissingMeta(items, {
-        cap: enrichCap || 5000,
-        concurrency: 8,
-        onProgress: (done, total, needTotal) => {
-          const denom = total;
-          const ofBit =
-            needTotal != null && needTotal > total ? ` (of ${needTotal})` : "";
+      // On Pause during load, skip enrich and return items as-is (still non-empty).
+      if (!loadPaused && !isScanAbortRequested()) {
+        const needEstimate = items.filter(needsMetaEnrich).length;
+        const enrichCap = Math.min(needEstimate, 5000);
+        if (needEstimate > 0) {
           emitScanProgress({
             phase: "meta",
-            done,
-            total: denom,
-            needTotal,
-            label: `filling details… ${done} / ${denom}${ofBit}`,
+            done: 0,
+            total: enrichCap,
+            needTotal: needEstimate,
+            label: `filling details… 0 / ${enrichCap}`,
+            tip: "filling details… (faster if Watch Later stays focused)",
           });
-        },
-      });
-      viewsEnriched = er.viewsEnriched || 0;
-      channelsEnriched = er.channelsEnriched || 0;
-      datesEnriched = er.datesEnriched || 0;
-      titlesEnriched = er.titlesEnriched || 0;
-      metaQueued = er.queued || 0;
-      metaNeedTotal = er.needTotal || 0;
+        }
+        const er = await enrichMissingMeta(items, {
+          cap: enrichCap || 5000,
+          concurrency: 8,
+          onProgress: (done, total, needTotal) => {
+            const denom = total;
+            const ofBit =
+              needTotal != null && needTotal > total ? ` (of ${needTotal})` : "";
+            emitScanProgress({
+              phase: "meta",
+              done,
+              total: denom,
+              needTotal,
+              label: `filling details… ${done} / ${denom}${ofBit}`,
+            });
+          },
+        });
+        viewsEnriched = er.viewsEnriched || 0;
+        channelsEnriched = er.channelsEnriched || 0;
+        datesEnriched = er.datesEnriched || 0;
+        titlesEnriched = er.titlesEnriched || 0;
+        metaQueued = er.queued || 0;
+        metaNeedTotal = er.needTotal || 0;
+        metaPaused = er.paused === true;
+      } else {
+        metaPaused = true;
+      }
     } catch {
       /* keep scrape result even if enrichment fails */
     }
@@ -1831,10 +1930,15 @@
       loadMeta.playlistVideoCount != null
         ? loadMeta.playlistVideoCount
         : parsePlaylistVideoCount();
-    const loadedFully =
-      loadMeta.loadedFully === true ||
-      (playlistVideoCount != null &&
-        items.length >= Math.ceil(Number(playlistVideoCount) * 0.98));
+    const leftPage = loadMeta.leftPage === true;
+    const paused =
+      loadPaused || metaPaused || isScanAbortRequested() || leftPage;
+    // Never claim a complete load on Pause — prune must treat as partial.
+    const loadedFully = paused
+      ? false
+      : loadMeta.loadedFully === true ||
+        (playlistVideoCount != null &&
+          items.length >= Math.ceil(Number(playlistVideoCount) * 0.98));
 
     return {
       ok: true,
@@ -1853,6 +1957,8 @@
       metaQueued,
       metaNeedTotal,
       loadedFully,
+      paused,
+      leftPage,
       scrollPasses: loadMeta.scrollPasses || 0,
       loadedCount: loadMeta.loadedCount || items.length,
     };
@@ -2550,6 +2656,11 @@
       scrape()
         .then(sendResponse)
         .catch((err) => sendResponse({ ok: false, error: String(err) }));
+      return true;
+    }
+    if (msg?.type === "STASH_SCAN_PAUSE") {
+      requestScanAbort();
+      sendResponse({ ok: true, pausing: true });
       return true;
     }
     if (msg?.type === "STASH_PING") {

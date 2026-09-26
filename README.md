@@ -32,6 +32,8 @@ Tinder-like triage for **YouTube Watch Later** (X bookmarks secondary). Built fo
 
 Uncategorized items are left alone on Apply.
 
+**0.3.19** — Pause mid-scan (Scan morphs to Pause): keep what’s loaded, merge into stash, triage while the rest waits. Clearer per-phase stay-on-page tips when the Watch Later tab is hidden (`paused — focus Watch Later to keep loading` / `…to keep filling details`). Leaving the playlist mid-load finalizes a partial like Pause.
+
 **0.3.18** — Pause WL scroll when the tab is hidden; clearer loading / filling-details progress; prefer largest playlist header count.
 
 **0.3.17** — Fix the side-panel pie card after clearing the stash.

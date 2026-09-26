@@ -87,6 +87,20 @@ const StashScanProgress = (() => {
     }
   }
 
+  /** User requested Pause — calm status while scrape finalizes partial. */
+  function setPaused(statusText) {
+    const { wrap, label, status } = els();
+    show();
+    if (wrap) {
+      wrap.classList.remove("is-indeterminate");
+      wrap.classList.add("is-determinate");
+    }
+    if (label) label.textContent = "pausing…";
+    if (status && statusText !== false) {
+      status.textContent = statusText || "pausing…";
+    }
+  }
+
   function setDone({ brief = true } = {}) {
     const { wrap, fill, label } = els();
     show();
@@ -114,7 +128,9 @@ const StashScanProgress = (() => {
         msg.paused === true || /paused/i.test(String(msg.label || ""));
       // Count under the bar; status stays a calm verb (or pause tip).
       const statusText = paused
-        ? "paused — focus Watch Later tab"
+        ? (msg.label && /focus Watch Later/i.test(msg.label)
+            ? msg.label
+            : "paused — focus Watch Later to keep loading")
         : "loading playlist…";
       setMeta(d, t || d, statusText);
       return;
@@ -131,8 +147,10 @@ const StashScanProgress = (() => {
       const paused =
         msg.paused === true || /paused/i.test(String(msg.label || ""));
       const statusText = paused
-        ? "paused — focus Watch Later tab"
-        : "filling details…";
+        ? (msg.label && /focus Watch Later/i.test(msg.label)
+            ? msg.label
+            : "paused — focus Watch Later to keep filling details")
+        : (msg.tip || "filling details… (faster if Watch Later stays focused)");
       setMeta(d, t, statusText);
       // Optional honesty when soft-cap truncates enrich queue vs full need set.
       const { label } = els();
@@ -160,6 +178,7 @@ const StashScanProgress = (() => {
     setScanning,
     setAuditing,
     setMeta,
+    setPaused,
     setDone,
     applyMessage,
     listen,

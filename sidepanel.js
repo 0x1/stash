@@ -225,6 +225,8 @@ function playlistContextFromTitle(title, url) {
  */
 function shouldPruneWatchLater(res) {
   if (!res?.isWatchLater) return false;
+  // Manual Pause / left page mid-load → never prune-as-complete.
+  if (res.paused === true || res.leftPage === true) return false;
   const scraped = Number(res.count) || (Array.isArray(res.items) ? res.items.length : 0);
   if (scraped <= 0) return false;
   if (res.loadedFully === true) return true;
@@ -244,7 +246,49 @@ function applyWatchLaterPrune(items, res) {
   return { items: out.items, pruned: out.pruned, skipped: false };
 }
 
+
+let scanning = false;
+let scanTabId = null;
+
+function setScanButtonMode(mode) {
+  const btn = $("btn-scan");
+  if (!btn) return;
+  if (mode === "pause") {
+    btn.textContent = "Pause";
+    btn.title = "Stop scan — triage what’s loaded";
+    btn.dataset.mode = "pause";
+  } else {
+    btn.textContent = 'Scan';
+    btn.title = 'Load Watch Later into Stash';
+    btn.dataset.mode = "scan";
+  }
+}
+
+async function pauseScan() {
+  if (!scanning) return;
+  if (typeof StashScanProgress !== "undefined" && StashScanProgress.setPaused) {
+    StashScanProgress.setPaused("pausing…");
+  } else {
+    $("status").textContent = "pausing…";
+  }
+  const tabId = scanTabId;
+  if (!tabId) return;
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: "STASH_SCAN_PAUSE" });
+  } catch {
+    /* scrape may already be finishing */
+  }
+}
+
 async function scan() {
+  if (scanning) {
+    await pauseScan();
+    return;
+  }
+  scanning = true;
+  scanTabId = null;
+  setScanButtonMode("pause");
+  try {
   if (typeof StashScanProgress !== "undefined") {
     StashScanProgress.setScanning("keep Watch Later tab focused");
   } else {
@@ -257,6 +301,7 @@ async function scan() {
     $("status").textContent = "no suitable tab — open youtube.com/playlist?list=WL";
     return;
   }
+  scanTabId = tab.id;
   if (typeof StashScanProgress !== "undefined") {
     StashScanProgress.setContext(playlistContextFromTitle(tab.title, tab.url));
   }
@@ -270,8 +315,7 @@ async function scan() {
   const { ponged } = await ensureScript(tab);
   if (!ponged) {
     if (typeof StashScanProgress !== "undefined") StashScanProgress.hide();
-    $("status").textContent =
-      `content script did not pong · ${url}. Hard-refresh that tab, then Scan again.`;
+    $("status").textContent = `content script did not pong · ${url}. Hard-refresh that tab, then Scan again.`;
     return;
   }
 
@@ -337,7 +381,6 @@ async function scan() {
       loadBit = ` · loaded ${got}`;
     }
   }
-  // Honesty: how many videos went through meta enrich this scan.
   const metaN = res.metaQueued ?? res.metaNeedTotal;
   if (metaN != null && Number(metaN) > 0) {
     loadBit += ` · meta ${metaN}`;
@@ -347,7 +390,18 @@ async function scan() {
     else if (res.playlistTitle) StashScanProgress.setContext(res.playlistTitle);
     StashScanProgress.setDone({ brief: true });
   }
-  $("status").textContent = `+${added} new · ${res.count} on page · ${hint}${method}${enrichBit}${pruneBit}${loadBit}`;
+  if (res.leftPage) {
+    $("status").textContent = `left Watch Later — Scan again from that tab · ${res.count} ready`;
+  } else if (res.paused) {
+    $("status").textContent = `paused · ${res.count} videos ready — triage or Scan again`;
+  } else {
+    $("status").textContent = `+${added} new · ${res.count} on page · ${hint}${method}${enrichBit}${pruneBit}${loadBit}`;
+  }
+  } finally {
+    scanning = false;
+    scanTabId = null;
+    setScanButtonMode("scan");
+  }
 }
 
 function openDeck() {
@@ -459,7 +513,10 @@ async function clearStash() {
   $("status").textContent = "stash cleared — Scan Watch Later to refill";
 }
 
-$("btn-scan").addEventListener("click", scan);
+$("btn-scan").addEventListener("click", () => {
+  if ($("btn-scan")?.dataset?.mode === "pause") pauseScan();
+  else scan();
+});
 $("btn-deck").addEventListener("click", openDeck);
 $("btn-apply").addEventListener("click", apply);
 $("btn-reset-triage").addEventListener("click", resetTriage);
